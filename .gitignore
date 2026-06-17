@@ -10,3 +10,6 @@ Package.resolved
 *.xcuserstate
 xcuserdata/
 DerivedData/
+
+# Distribution artifacts
+dist/
