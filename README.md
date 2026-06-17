@@ -47,3 +47,19 @@ swift test
 swift build
 scripts/package-app.sh
 ```
+
+## Release
+
+Package a distributable DMG locally:
+
+```bash
+scripts/make-dmg.sh 0.1.0   # -> dist/DeskPetMac-0.1.0.dmg
+```
+
+Or let CI do it: pushing a `v*` tag runs `.github/workflows/release.yml`, which
+tests, builds the DMG, and publishes a GitHub Release with the DMG attached.
+
+```bash
+git tag v0.1.1
+git push origin v0.1.1
+```
