@@ -4,7 +4,6 @@ import Foundation
 @MainActor
 final class LocationService: NSObject {
     private let manager = CLLocationManager()
-    private let geocoder = CLGeocoder()
     private var authContinuation: CheckedContinuation<CLAuthorizationStatus, Never>?
     private var locationContinuation: CheckedContinuation<CLLocation?, Never>?
 
@@ -18,6 +17,10 @@ final class LocationService: NSObject {
         let status = await ensureAuthorized()
         guard status == .authorizedAlways else { return nil }
         guard let location = await requestOneShotLocation() else { return nil }
+        // Create the geocoder locally: a freshly made, non-Sendable value lives in a
+        // disconnected region, so it can be used across the await without a data-race
+        // diagnostic under strict concurrency (Swift 6.0).
+        let geocoder = CLGeocoder()
         let placemark = try? await geocoder.reverseGeocodeLocation(location).first
         let name = placemark?.locality
             ?? placemark?.administrativeArea
