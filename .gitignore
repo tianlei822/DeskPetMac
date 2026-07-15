@@ -13,3 +13,6 @@ DerivedData/
 
 # Distribution artifacts
 dist/
+
+# Local design exploration
+.superpowers/
