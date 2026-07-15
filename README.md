@@ -12,6 +12,9 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 - **Floating heart particles** burst out when you pat or make the pet dance.
 - **Bond / affection system** — pats and play grow affection through five levels (New Friend → Soulmate), with hearts and a progress bar in the status bubble. Bond, pet choice, and reminder interval all persist across launches.
 - **Dance action** — tap the ♪ button (or `Cmd+D`) and the pet wiggles, tilts, and earns affection.
+- **Personality moments / 个性时刻** — every so often the pet quietly shares a short, contextual thought without stealing focus or sending a notification.
+- **Distinct voices / 鲜明个性** — Cat is lazy and mischievous, while Pauli is earnest, curious, and treats desk life like a tiny mission.
+- **Lively cat ears / 灵动猫耳** — layered inner ears and independent motion make pats, curiosity, and playful poses feel more natural.
 - **Sleep mode** — when you go idle for a while the pet closes its eyes and drifts off with floating `z`s, then wakes the moment you interact.
 - Local weather via CoreLocation + Open-Meteo. If permission or network fails, it falls back to a cozy neutral state.
 - Weather moods: sunny, cloudy, foggy, rainy, snowy, stormy, cozy.

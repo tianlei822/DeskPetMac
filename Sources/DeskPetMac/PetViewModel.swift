@@ -15,6 +15,7 @@ final class PetViewModel: ObservableObject {
     @Published private(set) var isDancing = false
     @Published private(set) var comboCount = 0
     @Published private(set) var heartBurst = 0
+    @Published private(set) var activePersonalityMoment: PersonalityMoment?
     @Published var isPetPickerVisible = false
     @Published var isSettingsVisible = false
     @Published var reminderMinutes = 60.0 {
@@ -33,6 +34,9 @@ final class PetViewModel: ObservableObject {
     private var sleepTask: Task<Void, Never>?
     private var danceTask: Task<Void, Never>?
     private var comboResetTask: Task<Void, Never>?
+    private var personalityScheduleTask: Task<Void, Never>?
+    private var personalityDismissTask: Task<Void, Never>?
+    private var recentPersonalityMomentIDs: [String] = []
     private var statusRevealToken = 0
     private var lastPatAt: Date?
 
@@ -73,6 +77,7 @@ final class PetViewModel: ObservableObject {
         startWorkMonitor()
         startSleepMonitor()
         startWeatherLoop()
+        startPersonalitySchedule()
         await refreshWeather()
     }
 
@@ -102,6 +107,7 @@ final class PetViewModel: ObservableObject {
 
     func pat() {
         wake()
+        let shouldShowInteractionResponse = activePersonalityMoment != nil
         let now = Date()
         if let last = lastPatAt, now.timeIntervalSince(last) <= comboWindow {
             comboCount = min(comboCount + 1, 99)
@@ -117,11 +123,16 @@ final class PetViewModel: ObservableObject {
         heartBurst += 1
         isReminderVisible = false
         scheduleComboReset()
-        revealStatusBriefly()
+        if shouldShowInteractionResponse {
+            _ = presentPersonalityMoment(category: .interaction)
+        } else {
+            revealStatusBriefly()
+        }
     }
 
     func dance() {
         wake()
+        clearPersonalityMoment()
         bond.registerPlay()
         persistBond()
 
@@ -138,6 +149,7 @@ final class PetViewModel: ObservableObject {
     }
 
     func takeBreak() {
+        clearPersonalityMoment()
         let policy = currentReminderPolicy()
         breakState = policy.markBreakTaken(state: breakState)
         sessionState = workTracker.start()
@@ -152,11 +164,13 @@ final class PetViewModel: ObservableObject {
     }
 
     func toggleSettings() {
+        clearPersonalityMoment()
         isSettingsVisible.toggle()
         revealStatusBriefly()
     }
 
     func selectPetKind(_ kind: PetKind) {
+        clearPersonalityMoment()
         guard petKind != kind else {
             isPetPickerVisible = false
             revealStatusBriefly()
@@ -190,6 +204,9 @@ final class PetViewModel: ObservableObject {
                 let sleeping = self.idleMonitor.idleSeconds() >= self.sleepIdleThreshold
                 if sleeping != self.isSleeping {
                     self.isSleeping = sleeping
+                    if sleeping {
+                        self.clearPersonalityMoment()
+                    }
                 }
             }
         }
@@ -215,6 +232,82 @@ final class PetViewModel: ObservableObject {
         }
     }
 
+    private func startPersonalitySchedule() {
+        personalityScheduleTask?.cancel()
+        personalityScheduleTask = Task { [weak self] in
+            while !Task.isCancelled {
+                let delay = PersonalityMomentSchedule.delay(for: Int.random(in: 0...600))
+                try? await Task.sleep(for: .seconds(delay))
+                guard let self, !Task.isCancelled else { return }
+                self.presentPersonalityMoment()
+            }
+        }
+    }
+
+    private var isPersonalityPresentationBlocked: Bool {
+        isSleeping
+            || isReminderVisible
+            || isStatusVisible
+            || isPetPickerVisible
+            || isSettingsVisible
+            || isRefreshingWeather
+            || isDancing
+    }
+
+    private func personalityContext(
+        requestedCategory: PersonalityMomentCategory? = nil
+    ) -> PersonalityMomentContext {
+        PersonalityMomentContext(
+            petKind: petKind,
+            mood: mood,
+            workProgress: workProgress,
+            requestedCategory: requestedCategory,
+            isPresentationBlocked: isPersonalityPresentationBlocked
+        )
+    }
+
+    @discardableResult
+    private func presentPersonalityMoment(
+        category: PersonalityMomentCategory? = nil
+    ) -> Bool {
+        let context = personalityContext(requestedCategory: category)
+        let recentIDs = Set(recentPersonalityMomentIDs)
+        let roll = Int.random(in: Int.min...Int.max)
+        var moment = PersonalityMomentSelector.select(
+            from: PersonalityMomentCatalog.all,
+            context: context,
+            excluding: recentIDs,
+            roll: roll
+        )
+
+        if moment == nil, category == .interaction {
+            moment = PersonalityMomentSelector.select(
+                from: PersonalityMomentCatalog.all,
+                context: context,
+                excluding: [],
+                roll: roll
+            )
+        }
+
+        guard let moment else { return false }
+        activePersonalityMoment = moment
+        recentPersonalityMomentIDs.append(moment.id)
+        recentPersonalityMomentIDs = Array(recentPersonalityMomentIDs.suffix(3))
+
+        personalityDismissTask?.cancel()
+        personalityDismissTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3.5))
+            guard !Task.isCancelled, self?.activePersonalityMoment?.id == moment.id else { return }
+            self?.activePersonalityMoment = nil
+        }
+        return true
+    }
+
+    private func clearPersonalityMoment() {
+        personalityDismissTask?.cancel()
+        activePersonalityMoment = nil
+    }
+
     private func recordWorkObservation() {
         sessionState = workTracker.recordObservation(
             previous: sessionState,
@@ -230,6 +323,7 @@ final class PetViewModel: ObservableObject {
 
         if policy.shouldRemind(state: candidate) {
             candidate = policy.markReminderShown(state: candidate)
+            clearPersonalityMoment()
             isReminderVisible = true
             notifications.showBreakReminder()
         }
@@ -262,6 +356,7 @@ final class PetViewModel: ObservableObject {
     }
 
     private func revealStatusBriefly() {
+        clearPersonalityMoment()
         statusRevealToken += 1
         let token = statusRevealToken
         isStatusVisible = true

@@ -187,3 +187,155 @@ struct PetBondTests {
         #expect(restored.level == .buddy)
     }
 }
+
+@Suite("Personality moments")
+struct PersonalityMomentTests {
+    @Test("catalog contains twelve unique moments for each pet and three per category")
+    func catalogShape() {
+        let moments = PersonalityMomentCatalog.all
+
+        for pet in PetKind.allCases {
+            let petMoments = moments.filter { $0.petKind == pet }
+
+            #expect(petMoments.count == 12)
+            #expect(Set(petMoments.map(\.id)).count == 12)
+            for category in PersonalityMomentCategory.allCases {
+                #expect(petMoments.filter { $0.category == category }.count == 3)
+            }
+        }
+    }
+
+    @Test("selector respects pet context and recent exclusions")
+    func contextualSelection() {
+        let context = PersonalityMomentContext(
+            petKind: .cat,
+            mood: .rainy,
+            workProgress: 0.8,
+            requestedCategory: nil,
+            isPresentationBlocked: false
+        )
+
+        let selected = PersonalityMomentSelector.select(
+            from: PersonalityMomentCatalog.all,
+            context: context,
+            excluding: [],
+            roll: 0
+        )
+
+        #expect(selected?.petKind == .cat)
+        #expect(selected?.category != .interaction)
+        #expect(selected.map { $0.matches(context) } == true)
+
+        let excludedIDs = selected.map { Set([$0.id]) } ?? []
+        let replacement = PersonalityMomentSelector.select(
+            from: PersonalityMomentCatalog.all,
+            context: context,
+            excluding: excludedIDs,
+            roll: 0
+        )
+
+        #expect(replacement?.id != selected?.id)
+    }
+
+    @Test("blocked presentation produces no moment")
+    func blockedSelection() {
+        let context = PersonalityMomentContext(
+            petKind: .cat,
+            mood: .cozy,
+            workProgress: 0,
+            requestedCategory: nil,
+            isPresentationBlocked: true
+        )
+
+        #expect(PersonalityMomentSelector.select(
+            from: PersonalityMomentCatalog.all,
+            context: context,
+            excluding: [],
+            roll: 0
+        ) == nil)
+    }
+
+    @Test("interaction requests select only the requested pet interaction")
+    func interactionSelection() {
+        let context = PersonalityMomentContext(
+            petKind: .pauli,
+            mood: .cozy,
+            workProgress: 0,
+            requestedCategory: .interaction,
+            isPresentationBlocked: false
+        )
+
+        let selected = PersonalityMomentSelector.select(
+            from: PersonalityMomentCatalog.all,
+            context: context,
+            excluding: [],
+            roll: 2
+        )
+
+        #expect(selected?.petKind == .pauli)
+        #expect(selected?.category == .interaction)
+    }
+
+    @Test("weather and focus moments require matching context")
+    func conditionalMatches() {
+        let catWeather = PersonalityMomentCatalog.all.first {
+            $0.petKind == .cat && $0.category == .weather
+        }
+        let catFocus = PersonalityMomentCatalog.all.first {
+            $0.petKind == .cat && $0.category == .focus
+        }
+
+        #expect(catWeather != nil)
+        #expect(catFocus != nil)
+        if let catWeather {
+            let matchingMood = catWeather.moods.first ?? .cozy
+            let matching = PersonalityMomentContext(
+                petKind: .cat,
+                mood: matchingMood,
+                workProgress: 0,
+                requestedCategory: nil,
+                isPresentationBlocked: false
+            )
+            let nonmatching = PersonalityMomentContext(
+                petKind: .cat,
+                mood: PetWeatherMood.allCases.first { !catWeather.moods.contains($0) } ?? matchingMood,
+                workProgress: 0,
+                requestedCategory: nil,
+                isPresentationBlocked: false
+            )
+
+            #expect(catWeather.matches(matching))
+            if nonmatching.mood != matchingMood {
+                #expect(!catWeather.matches(nonmatching))
+            }
+        }
+        if let catFocus {
+            let threshold = catFocus.minimumWorkProgress ?? 0
+            let below = PersonalityMomentContext(
+                petKind: .cat,
+                mood: .cozy,
+                workProgress: max(0, threshold - 0.01),
+                requestedCategory: nil,
+                isPresentationBlocked: false
+            )
+            let atThreshold = PersonalityMomentContext(
+                petKind: .cat,
+                mood: .cozy,
+                workProgress: threshold,
+                requestedCategory: nil,
+                isPresentationBlocked: false
+            )
+
+            #expect(!catFocus.matches(below))
+            #expect(catFocus.matches(atThreshold))
+        }
+    }
+
+    @Test("personality delay stays between ten and twenty minutes")
+    func scheduleBounds() {
+        #expect(PersonalityMomentSchedule.delay(for: 0) == 10 * 60)
+        #expect(PersonalityMomentSchedule.delay(for: 600) == 20 * 60)
+        #expect(PersonalityMomentSchedule.delay(for: Int.min) >= 10 * 60)
+        #expect(PersonalityMomentSchedule.delay(for: Int.max) <= 20 * 60)
+    }
+}

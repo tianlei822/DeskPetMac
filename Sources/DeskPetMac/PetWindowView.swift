@@ -4,6 +4,7 @@ import SwiftUI
 
 struct PetWindowView: View {
     @ObservedObject var model: PetViewModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var hover = false
 
     var body: some View {
@@ -22,7 +23,9 @@ struct PetWindowView: View {
                         isHovering: hover,
                         pulse: model.affectionPulse,
                         isSleeping: model.isSleeping,
-                        isDancing: model.isDancing
+                        isDancing: model.isDancing,
+                        personalityPose: model.activePersonalityMoment?.pose,
+                        reduceMotion: reduceMotion
                     )
                 }
                 .buttonStyle(.plain)
@@ -55,6 +58,10 @@ struct PetWindowView: View {
         .animation(.easeInOut(duration: 0.3), value: model.isSleeping)
         .animation(.easeInOut(duration: 0.22), value: model.isReminderVisible)
         .animation(.easeInOut(duration: 0.22), value: model.isStatusVisible)
+        .animation(
+            reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.76),
+            value: model.activePersonalityMoment?.id
+        )
         .animation(.easeInOut(duration: 0.16), value: controlsVisible)
     }
 
@@ -71,9 +78,20 @@ struct PetWindowView: View {
         if model.isReminderVisible {
             BreakBubble(model: model)
                 .transition(.move(edge: .top).combined(with: .opacity))
-        } else if hover || model.isStatusVisible || model.isRefreshingWeather || model.isSettingsVisible {
+        } else if hover
+            || model.isStatusVisible
+            || model.isRefreshingWeather
+            || model.isPetPickerVisible
+            || model.isSettingsVisible {
             StatusBubble(model: model)
                 .transition(.move(edge: .top).combined(with: .opacity))
+        } else if let moment = model.activePersonalityMoment {
+            PersonalityBubble(moment: moment)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .move(edge: .top).combined(with: .opacity)
+                )
         }
     }
 }
@@ -142,7 +160,7 @@ private struct ControlStrip: View {
     let isVisible: Bool
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 5) {
             Button {
                 model.isPetPickerVisible.toggle()
             } label: {
@@ -249,22 +267,70 @@ private struct PetBody: View {
     let pulse: Int
     let isSleeping: Bool
     let isDancing: Bool
+    let personalityPose: PersonalityPose?
+    let reduceMotion: Bool
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let danceBob = isDancing ? abs(sin(t * 9.0)) * 8 : 0
-            let bob = (isSleeping ? sin(t * 1.1) * 1.6 : sin(t * (kind == .pauli ? 2.8 : 2.4)) * 4) - danceBob
-            let ear = sin(t * 4.0) * 4
+            let idleBob = isSleeping
+                ? sin(t * 1.1) * 1.6
+                : sin(t * (kind == .pauli ? 2.8 : 2.4)) * 4
+            let personalityBob = if reduceMotion {
+                0.0
+            } else {
+                switch personalityPose {
+                case .some(.peek): sin(t * 3.2) * 1.4
+                case .some(.perk): abs(sin(t * 5.8)) * -3.2
+                case .some(.stretch): sin(t * 2.0) * 1.2
+                case .some(.proud): sin(t * 3.0) * -1.0
+                case .none: 0.0
+                }
+            }
+            let bob = idleBob - danceBob + personalityBob
+            let leftEarDrift = reduceMotion ? 0 : sin(t * 3.7) * 2.4
+            let rightEarDrift = reduceMotion ? 0 : sin(t * 3.3 + 1.1) * 2.0
+            let leftEarPoseAngle = switch personalityPose {
+            case .some(.perk): 10.0
+            case .some(.stretch): -8.0
+            case .some(.peek): 4.0
+            case .some(.proud): -3.0
+            case .none: 0.0
+            }
+            let rightEarPoseAngle = switch personalityPose {
+            case .some(.perk): -4.0
+            case .some(.stretch): 5.0
+            case .some(.peek): -7.0
+            case .some(.proud): 9.0
+            case .none: 0.0
+            }
             let tail = sin(t * (isDancing ? 9.0 : 5.0)) * (isDancing ? 14 : 8)
             let eyesClosed = isSleeping || Int(t * 1.2) % 7 == 0
             let scale = isHovering ? 1.035 : 1.0
             let statusPulse = 0.78 + abs(sin(t * 3.4)) * 0.22
             let danceTilt = isDancing ? sin(t * 9.0) * 9 : 0
+            let personalityTilt = if reduceMotion {
+                0.0
+            } else {
+                switch personalityPose {
+                case .some(.peek): -3.5
+                case .some(.perk): 2.0
+                case .some(.stretch): -1.5
+                case .some(.proud): 3.0
+                case .none: 0.0
+                }
+            }
 
             ZStack {
                 if kind == .pauli {
-                    PauliBody(mood: mood, blink: eyesClosed, bob: bob, statusPulse: statusPulse)
+                    PauliBody(
+                        mood: mood,
+                        blink: eyesClosed,
+                        bob: bob,
+                        statusPulse: statusPulse,
+                        personalityPose: personalityPose
+                    )
                 } else {
                     ShadowBlob()
                         .offset(y: 62)
@@ -284,17 +350,22 @@ private struct PetBody: View {
                         )
                         .offset(y: 20 + bob)
 
-                    Ear()
-                        .fill(palette.ear)
-                        .frame(width: 40, height: 49)
-                        .rotationEffect(.degrees(-16 - ear))
-                        .offset(x: -36, y: -30 + bob)
+                    CatEarView(color: palette.ear)
+                        .frame(width: 46, height: 56)
+                        .rotationEffect(
+                            .degrees(-12 + leftEarDrift + leftEarPoseAngle),
+                            anchor: .bottom
+                        )
+                        .offset(x: -37, y: -31 + bob)
 
-                    Ear()
-                        .fill(palette.ear)
-                        .frame(width: 40, height: 49)
-                        .rotationEffect(.degrees(16 + ear))
-                        .offset(x: 36, y: -30 + bob)
+                    CatEarView(color: palette.ear)
+                        .frame(width: 46, height: 56)
+                        .scaleEffect(x: -1, y: 1)
+                        .rotationEffect(
+                            .degrees(11 + rightEarDrift + rightEarPoseAngle),
+                            anchor: .bottom
+                        )
+                        .offset(x: 37, y: -30 + bob)
 
                     Circle()
                         .fill(palette.face)
@@ -305,7 +376,11 @@ private struct PetBody: View {
                         )
                         .offset(y: bob)
 
-                    Face(eyesClosed: eyesClosed, mood: mood)
+                    Face(
+                        eyesClosed: eyesClosed,
+                        mood: mood,
+                        personalityPose: personalityPose
+                    )
                         .offset(y: bob + 4)
                 }
 
@@ -320,7 +395,7 @@ private struct PetBody: View {
                 }
             }
             .frame(width: 156, height: 158)
-            .rotationEffect(.degrees(danceTilt))
+            .rotationEffect(.degrees(danceTilt + personalityTilt))
             .scaleEffect(scale + (pulse.isMultiple(of: 2) ? 0 : 0.015))
         }
     }
@@ -333,46 +408,106 @@ private struct PetBody: View {
 private struct Face: View {
     let eyesClosed: Bool
     let mood: PetWeatherMood
+    let personalityPose: PersonalityPose?
 
     var body: some View {
         VStack(spacing: 7) {
             HStack(spacing: 30) {
-                Eye(blink: eyesClosed)
-                Eye(blink: eyesClosed)
+                Eye(expression: leftEyeExpression)
+                Eye(expression: rightEyeExpression)
             }
             ZStack {
                 Capsule()
                     .fill(Color(red: 0.28, green: 0.20, blue: 0.22))
-                    .frame(width: mood == .stormy ? 16 : 22, height: 6)
+                    .frame(width: mouthWidth, height: mouthHeight)
                     .offset(y: 3)
                 Circle()
-                    .fill(Color(red: 1.0, green: 0.56, blue: 0.64).opacity(0.55))
+                    .fill(Color(red: 1.0, green: 0.56, blue: 0.64).opacity(cheekOpacity))
                     .frame(width: 11, height: 7)
                     .offset(x: -29)
                 Circle()
-                    .fill(Color(red: 1.0, green: 0.56, blue: 0.64).opacity(0.55))
+                    .fill(Color(red: 1.0, green: 0.56, blue: 0.64).opacity(cheekOpacity))
                     .frame(width: 11, height: 7)
                     .offset(x: 29)
             }
         }
     }
+
+    private var leftEyeExpression: CatEyeExpression {
+        guard !eyesClosed else { return .closed }
+        return switch personalityPose {
+        case .some(.perk): .wide
+        case .some(.stretch): .closed
+        case .some(.peek), .some(.proud), .none: .open
+        }
+    }
+
+    private var rightEyeExpression: CatEyeExpression {
+        guard !eyesClosed else { return .closed }
+        return switch personalityPose {
+        case .some(.perk): .wide
+        case .some(.stretch): .closed
+        case .some(.peek), .some(.proud): .squint
+        case .none: .open
+        }
+    }
+
+    private var mouthWidth: CGFloat {
+        switch personalityPose {
+        case .some(.perk): 15
+        case .some(.stretch): 17
+        case .some(.peek): 19
+        case .some(.proud), .none: mood == .stormy ? 16 : 22
+        }
+    }
+
+    private var mouthHeight: CGFloat {
+        personalityPose == .perk ? 9 : 6
+    }
+
+    private var cheekOpacity: Double {
+        switch personalityPose {
+        case .some(.perk), .some(.proud): 0.72
+        case .some(.peek), .some(.stretch), .none: 0.55
+        }
+    }
+}
+
+private enum CatEyeExpression {
+    case open
+    case wide
+    case squint
+    case closed
 }
 
 private struct Eye: View {
-    let blink: Bool
+    let expression: CatEyeExpression
 
     var body: some View {
         Capsule()
             .fill(Color(red: 0.16, green: 0.13, blue: 0.16))
-            .frame(width: 13, height: blink ? 3 : 18)
+            .frame(width: width, height: height)
             .overlay(alignment: .topTrailing) {
-                if !blink {
+                if expression == .open || expression == .wide {
                     Circle()
                         .fill(.white.opacity(0.92))
                         .frame(width: 4, height: 4)
                         .offset(x: -3, y: 4)
                 }
             }
+    }
+
+    private var width: CGFloat {
+        expression == .squint ? 15 : 13
+    }
+
+    private var height: CGFloat {
+        switch expression {
+        case .open: 18
+        case .wide: 21
+        case .squint: 4
+        case .closed: 3
+        }
     }
 }
 
@@ -381,9 +516,35 @@ private struct PauliBody: View {
     let blink: Bool
     let bob: Double
     let statusPulse: Double
+    let personalityPose: PersonalityPose?
 
     var body: some View {
         let accent = pauliAccent
+        let leftPodLift: CGFloat = switch personalityPose {
+        case .some(.peek): -3
+        case .some(.perk): -5
+        case .some(.stretch): 3
+        case .some(.proud), .none: 0
+        }
+        let rightPodLift: CGFloat = switch personalityPose {
+        case .some(.peek): 2
+        case .some(.perk): -2
+        case .some(.stretch): 3
+        case .some(.proud): -3
+        case .none: 0
+        }
+        let antennaAngle: Double = switch personalityPose {
+        case .some(.peek): -10
+        case .some(.perk): 12
+        case .some(.stretch): -5
+        case .some(.proud): 6
+        case .none: 0
+        }
+        let statusScale: CGFloat = switch personalityPose {
+        case .some(.perk): 1.16
+        case .some(.proud): 1.10
+        case .some(.peek), .some(.stretch), .none: 1
+        }
 
         ZStack {
             ShadowBlob()
@@ -405,7 +566,7 @@ private struct PauliBody: View {
                     PauliSidePod()
                         .stroke(accent.opacity(0.55), lineWidth: 2)
                 )
-                .offset(x: -61, y: 1 + bob)
+                .offset(x: -61, y: 1 + bob + leftPodLift)
 
             PauliSidePod()
                 .fill(Color(red: 0.26, green: 0.36, blue: 0.43))
@@ -416,7 +577,7 @@ private struct PauliBody: View {
                         .stroke(accent.opacity(0.55), lineWidth: 2)
                         .scaleEffect(x: -1, y: 1)
                 )
-                .offset(x: 61, y: 1 + bob)
+                .offset(x: 61, y: 1 + bob + rightPodLift)
 
             RoundedRectangle(cornerRadius: 24, style: .continuous)
                 .fill(
@@ -445,13 +606,19 @@ private struct PauliBody: View {
                         .stroke(accent.opacity(0.82), lineWidth: 1.6)
                 )
                 .overlay {
-                    PauliFace(accent: accent, blink: blink, mood: mood)
+                    PauliFace(
+                        accent: accent,
+                        blink: blink,
+                        mood: mood,
+                        personalityPose: personalityPose
+                    )
                 }
                 .offset(y: bob + 2)
 
             Capsule()
                 .fill(Color(red: 0.26, green: 0.36, blue: 0.43))
                 .frame(width: 7, height: 20)
+                .rotationEffect(.degrees(antennaAngle), anchor: .bottom)
                 .offset(y: bob - 56)
 
             Circle()
@@ -459,6 +626,7 @@ private struct PauliBody: View {
                 .frame(width: 17, height: 17)
                 .overlay(Circle().stroke(Color.white.opacity(0.72), lineWidth: 1.4))
                 .shadow(color: accent.opacity(0.65), radius: 8)
+                .scaleEffect(statusScale)
                 .offset(y: bob - 69)
 
             HStack(spacing: 22) {
@@ -489,23 +657,27 @@ private struct PauliFace: View {
     let accent: Color
     let blink: Bool
     let mood: PetWeatherMood
+    let personalityPose: PersonalityPose?
 
     var body: some View {
         VStack(spacing: 8) {
             HStack(spacing: 21) {
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(accent)
-                    .frame(width: 17, height: blink ? 3 : 13)
+                    .frame(width: leftEyeWidth, height: leftEyeHeight)
                 RoundedRectangle(cornerRadius: 4, style: .continuous)
                     .fill(accent)
-                    .frame(width: 17, height: blink ? 3 : 13)
+                    .frame(width: rightEyeWidth, height: rightEyeHeight)
             }
 
             HStack(spacing: 4) {
                 ForEach(0..<3, id: \.self) { index in
                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                         .fill(accent.opacity(index == 1 && mood == .stormy ? 0.35 : 0.88))
-                        .frame(width: 8, height: mood == .stormy ? 4 : 5)
+                        .frame(
+                            width: personalityPose == .proud && index == 1 ? 12 : 8,
+                            height: mood == .stormy ? 4 : 5
+                        )
                 }
             }
 
@@ -514,6 +686,32 @@ private struct PauliFace: View {
                 Circle().fill(accent.opacity(0.55)).frame(width: 4, height: 4)
                 Circle().fill(accent.opacity(0.32)).frame(width: 4, height: 4)
             }
+        }
+    }
+
+    private var leftEyeWidth: CGFloat {
+        personalityPose == .stretch && !blink ? 20 : 17
+    }
+
+    private var rightEyeWidth: CGFloat {
+        personalityPose == .peek && !blink ? 20 : 17
+    }
+
+    private var leftEyeHeight: CGFloat {
+        guard !blink else { return 3 }
+        return switch personalityPose {
+        case .some(.perk): 16
+        case .some(.stretch): 4
+        case .some(.peek), .some(.proud), .none: 13
+        }
+    }
+
+    private var rightEyeHeight: CGFloat {
+        guard !blink else { return 3 }
+        return switch personalityPose {
+        case .some(.perk): 16
+        case .some(.peek), .some(.proud), .some(.stretch): 4
+        case .none: 13
         }
     }
 }
@@ -642,7 +840,7 @@ private struct PetIconButtonStyle: ButtonStyle {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
             .foregroundStyle(isActive ? .white : .primary)
-            .frame(width: 27, height: 25)
+            .frame(width: 29, height: 27)
             .background(
                 isActive ? tint.opacity(configuration.isPressed ? 0.62 : 0.82) : Color.clear,
                 in: RoundedRectangle(cornerRadius: 10, style: .continuous)
@@ -652,7 +850,9 @@ private struct PetIconButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(isActive ? tint.opacity(0.92) : .white.opacity(configuration.isPressed ? 0.38 : 0.22), lineWidth: 1)
             )
+            .shadow(color: .black.opacity(configuration.isPressed ? 0.04 : 0.10), radius: 4, y: 2)
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
+            .animation(.spring(response: 0.20, dampingFraction: 0.68), value: configuration.isPressed)
     }
 }
 
@@ -734,25 +934,52 @@ private struct PetPalette {
     }
 }
 
-private struct Ear: Shape {
+private struct CatEarView: View {
+    let color: Color
+
+    var body: some View {
+        ZStack {
+            CatEarShape()
+                .fill(color)
+                .overlay(
+                    CatEarShape()
+                        .stroke(.white.opacity(0.30), lineWidth: 1.4)
+                )
+
+            CatEarShape()
+                .fill(Color(red: 1.0, green: 0.57, blue: 0.67).opacity(0.48))
+                .frame(width: 27, height: 37)
+                .offset(x: -1, y: 7)
+
+            Capsule()
+                .fill(.white.opacity(0.24))
+                .frame(width: 3, height: 25)
+                .rotationEffect(.degrees(13))
+                .offset(x: -8, y: -5)
+        }
+    }
+}
+
+private struct CatEarShape: Shape {
     func path(in rect: CGRect) -> Path {
         var path = Path()
-        path.move(to: CGPoint(x: rect.midX, y: rect.minY))
+        path.move(to: CGPoint(x: rect.minX + 3, y: rect.maxY - 3))
         path.addCurve(
-            to: CGPoint(x: rect.maxX, y: rect.maxY),
-            control1: CGPoint(x: rect.maxX, y: rect.minY + 10),
-            control2: CGPoint(x: rect.maxX + 3, y: rect.maxY - 10)
+            to: CGPoint(x: rect.midX - 2, y: rect.minY + 2),
+            control1: CGPoint(x: rect.minX + 2, y: rect.midY - 5),
+            control2: CGPoint(x: rect.midX - 8, y: rect.minY + 3)
         )
         path.addCurve(
-            to: CGPoint(x: rect.minX, y: rect.maxY),
-            control1: CGPoint(x: rect.midX, y: rect.maxY + 8),
-            control2: CGPoint(x: rect.minX - 3, y: rect.maxY - 10)
+            to: CGPoint(x: rect.maxX - 2, y: rect.maxY - 5),
+            control1: CGPoint(x: rect.midX + 4, y: rect.minY - 1),
+            control2: CGPoint(x: rect.maxX + 1, y: rect.midY + 3)
         )
         path.addCurve(
-            to: CGPoint(x: rect.midX, y: rect.minY),
-            control1: CGPoint(x: rect.minX, y: rect.minY + 10),
-            control2: CGPoint(x: rect.midX - 8, y: rect.minY)
+            to: CGPoint(x: rect.minX + 3, y: rect.maxY - 3),
+            control1: CGPoint(x: rect.maxX - 11, y: rect.maxY + 1),
+            control2: CGPoint(x: rect.minX + 13, y: rect.maxY + 1)
         )
+        path.closeSubpath()
         return path
     }
 }
