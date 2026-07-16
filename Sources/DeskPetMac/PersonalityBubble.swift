@@ -36,6 +36,8 @@ struct PersonalityBubble: View {
             Color(red: 0.31, green: 0.22, blue: 0.25)
         case .pauli:
             Color(red: 0.20, green: 0.31, blue: 0.38)
+        case .dog:
+            Color(red: 0.48, green: 0.25, blue: 0.08)
         }
     }
 
@@ -45,6 +47,8 @@ struct PersonalityBubble: View {
             Color(red: 1.00, green: 0.96, blue: 0.90).opacity(0.88)
         case .pauli:
             Color(red: 0.91, green: 0.98, blue: 0.98).opacity(0.88)
+        case .dog:
+            Color(red: 1.00, green: 0.91, blue: 0.76).opacity(0.88)
         }
     }
 }

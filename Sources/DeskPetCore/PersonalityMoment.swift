@@ -1,6 +1,6 @@
 import Foundation
 
-public enum PersonalityPose: String, CaseIterable, Equatable, Sendable {
+public enum PersonalityPose: String, CaseIterable, Equatable, Hashable, Sendable {
     case peek
     case perk
     case stretch
@@ -317,6 +317,105 @@ public enum PersonalityMomentCatalog {
             category: .interaction,
             pose: .stretch,
             line: "Again? Excellent testing protocol."
+        ),
+        .init(
+            id: "dog.general.adventure",
+            petKind: .dog,
+            category: .general,
+            pose: .peek,
+            line: "You moved! Adventure?",
+            weight: 3
+        ),
+        .init(
+            id: "dog.general.desk-patrol",
+            petKind: .dog,
+            category: .general,
+            pose: .proud,
+            line: "Desk patrol ready. Tail systems online!",
+            weight: 3
+        ),
+        .init(
+            id: "dog.general.best-seat",
+            petKind: .dog,
+            category: .general,
+            pose: .perk,
+            line: "Best seat, best human, excellent day.",
+            weight: 3
+        ),
+        .init(
+            id: "dog.weather.sunny-walk",
+            petKind: .dog,
+            category: .weather,
+            pose: .perk,
+            line: "Sunshine detected. Walk possibility: huge!",
+            moods: [.sunny],
+            weight: 2
+        ),
+        .init(
+            id: "dog.weather.rain-team",
+            petKind: .dog,
+            category: .weather,
+            pose: .proud,
+            line: "Rain outside. Cozy team inside!",
+            moods: [.rainy, .stormy],
+            weight: 2
+        ),
+        .init(
+            id: "dog.weather.snuggle-forecast",
+            petKind: .dog,
+            category: .weather,
+            pose: .stretch,
+            line: "Forecast says one hundred percent snuggles.",
+            moods: [.cloudy, .foggy, .snowy, .cozy],
+            weight: 2
+        ),
+        .init(
+            id: "dog.focus.guard",
+            petKind: .dog,
+            category: .focus,
+            pose: .proud,
+            line: "You focus. I guard the whole desk!",
+            minimumWorkProgress: 0.25,
+            weight: 2
+        ),
+        .init(
+            id: "dog.focus.still-here",
+            petKind: .dog,
+            category: .focus,
+            pose: .peek,
+            line: "Still working? I am still cheering!",
+            minimumWorkProgress: 0.55,
+            weight: 2
+        ),
+        .init(
+            id: "dog.focus.finish-line",
+            petKind: .dog,
+            category: .focus,
+            pose: .perk,
+            line: "Finish line close. Tail speed increasing!",
+            minimumWorkProgress: 0.80,
+            weight: 2
+        ),
+        .init(
+            id: "dog.interaction.best-pat",
+            petKind: .dog,
+            category: .interaction,
+            pose: .perk,
+            line: "Best pat yet! Again?"
+        ),
+        .init(
+            id: "dog.interaction.favorite",
+            petKind: .dog,
+            category: .interaction,
+            pose: .proud,
+            line: "Confirmed: you are my favorite."
+        ),
+        .init(
+            id: "dog.interaction.team",
+            petKind: .dog,
+            category: .interaction,
+            pose: .stretch,
+            line: "Teamwork! You pat, I wag."
         )
     ]
 }

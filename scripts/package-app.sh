@@ -11,8 +11,16 @@ contents_path="${app_path}/Contents"
 macos_path="${contents_path}/MacOS"
 resources_path="${contents_path}/Resources"
 icon_source_path="Resources/AppIcon.icns"
+resource_bundle_name="${product_name}_${product_name}.bundle"
+resource_bundle_source_path=".build/${configuration}/${resource_bundle_name}"
+resource_bundle_path="${resources_path}/${resource_bundle_name}"
 
 swift build -c "${configuration}" --product "${product_name}" >&2
+
+if [[ ! -d "${resource_bundle_source_path}" ]]; then
+    echo "error: missing SwiftPM resource bundle at ${resource_bundle_source_path}" >&2
+    exit 1
+fi
 
 if [[ ! -f "${icon_source_path}" ]]; then
     scripts/generate-app-icon.swift >&2
@@ -23,6 +31,7 @@ mkdir -p "${macos_path}" "${resources_path}"
 cp ".build/${configuration}/${product_name}" "${macos_path}/${product_name}"
 chmod +x "${macos_path}/${product_name}"
 cp "${icon_source_path}" "${resources_path}/AppIcon.icns"
+cp -R "${resource_bundle_source_path}" "${resource_bundle_path}"
 
 cat > "${contents_path}/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

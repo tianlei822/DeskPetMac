@@ -24,6 +24,56 @@ struct WeatherMoodMappingTests {
     }
 }
 
+@Suite("Weather animation profiles")
+struct WeatherAnimationProfileTests {
+    @Test("particle counts stay bounded and transitions stay consistent")
+    func particleCountsStayBounded() {
+        for mood in PetWeatherMood.allCases {
+            let profile = WeatherAnimationProfile(mood: mood)
+
+            #expect(profile.backgroundParticleCount >= 0)
+            #expect(profile.foregroundParticleCount >= 0)
+            #expect(profile.backgroundParticleCount + profile.foregroundParticleCount <= 16)
+            #expect(profile.transitionDuration == 0.6)
+        }
+    }
+
+    @Test("ground ripples and lightning stay limited to applicable moods")
+    func weatherEffectsStayLimitedToApplicableMoods() {
+        for mood in PetWeatherMood.allCases {
+            let profile = WeatherAnimationProfile(mood: mood)
+
+            #expect(profile.showsGroundRipple == (mood == .rainy || mood == .stormy))
+            #expect(profile.supportsLightning == (mood == .stormy))
+
+            if mood == .stormy {
+                #expect(profile.lightningPeriod == 22)
+            } else {
+                #expect(profile.lightningPeriod == nil)
+            }
+        }
+    }
+
+    @Test("rain and storms preserve character-specific reactions")
+    func weatherReactionsStayCharacterSpecific() {
+        #expect(WeatherAnimationProfile.reaction(for: .cat, mood: .rainy) == .shelter)
+        #expect(WeatherAnimationProfile.reaction(for: .pauli, mood: .rainy) == .visorGlow)
+        #expect(WeatherAnimationProfile.reaction(for: .dog, mood: .rainy) == .shake)
+        #expect(WeatherAnimationProfile.reaction(for: .cat, mood: .stormy) == .startle)
+        #expect(WeatherAnimationProfile.reaction(for: .pauli, mood: .stormy) == .antennaGlow)
+        #expect(WeatherAnimationProfile.reaction(for: .dog, mood: .stormy) == .startle)
+    }
+
+    @Test("every pet and mood combination has a reaction")
+    func everyPetAndMoodHasAReaction() {
+        for petKind in PetKind.allCases {
+            for mood in PetWeatherMood.allCases {
+                #expect(WeatherAnimationProfile.reaction(for: petKind, mood: mood) != .none)
+            }
+        }
+    }
+}
+
 @Suite("Break reminders")
 struct BreakReminderPolicyTests {
     @Test("default reminder interval is sixty minutes")
@@ -107,11 +157,103 @@ struct WorkSessionTrackerTests {
 
 @Suite("Pet kinds")
 struct PetKindTests {
-    @Test("offers explicit selectable pet kinds")
-    func offersExplicitPetKinds() {
-        #expect(PetKind.allCases == [.cat, .pauli])
+    @Test("offers stable selectable pet kinds")
+    func offersStablePetKinds() {
+        #expect(PetKind.allCases == [.cat, .pauli, .dog])
+        #expect(PetKind.cat.rawValue == "cat")
+        #expect(PetKind.pauli.rawValue == "pauli")
+        #expect(PetKind.dog.rawValue == "dog")
         #expect(PetKind.cat.displayName == "Cat")
         #expect(PetKind.pauli.displayName == "Pauli")
+        #expect(PetKind.dog.displayName == "Dog")
+    }
+}
+
+@Suite("Pet artwork manifest")
+struct PetArtworkManifestTests {
+    @Test("each pet has stable artwork filenames for every presentation state")
+    func everyPetHasStableArtworkNames() {
+        let fixtures: [(
+            petKind: PetKind,
+            base: String,
+            blink: String,
+            hover: String,
+            pat: String,
+            sleep: String,
+            peek: String,
+            perk: String,
+            stretch: String,
+            proud: String
+        )] = [
+            (
+                .cat,
+                "Pets/Cat/base",
+                "Pets/Cat/blink",
+                "Pets/Cat/hover",
+                "Pets/Cat/pat",
+                "Pets/Cat/sleep",
+                "Pets/Cat/peek",
+                "Pets/Cat/perk",
+                "Pets/Cat/stretch",
+                "Pets/Cat/proud"
+            ),
+            (
+                .pauli,
+                "Pets/Pauli/base",
+                "Pets/Pauli/blink",
+                "Pets/Pauli/hover",
+                "Pets/Pauli/pat",
+                "Pets/Pauli/sleep",
+                "Pets/Pauli/peek",
+                "Pets/Pauli/perk",
+                "Pets/Pauli/stretch",
+                "Pets/Pauli/proud"
+            ),
+            (
+                .dog,
+                "Pets/Dog/base",
+                "Pets/Dog/blink",
+                "Pets/Dog/hover",
+                "Pets/Dog/pat",
+                "Pets/Dog/sleep",
+                "Pets/Dog/peek",
+                "Pets/Dog/perk",
+                "Pets/Dog/stretch",
+                "Pets/Dog/proud"
+            )
+        ]
+
+        for fixture in fixtures {
+            let manifest = PetArtworkManifest(petKind: fixture.petKind)
+
+            #expect(manifest.base == fixture.base)
+            #expect(manifest.blink == fixture.blink)
+            #expect(manifest.hover == fixture.hover)
+            #expect(manifest.pat == fixture.pat)
+            #expect(manifest.sleep == fixture.sleep)
+            #expect(manifest.personality[.peek] == fixture.peek)
+            #expect(manifest.personality[.perk] == fixture.perk)
+            #expect(manifest.personality[.stretch] == fixture.stretch)
+            #expect(manifest.personality[.proud] == fixture.proud)
+
+            #expect(manifest.resourceName(for: .idle) == fixture.base)
+            #expect(manifest.resourceName(for: .blink) == fixture.blink)
+            #expect(manifest.resourceName(for: .hover) == fixture.hover)
+            #expect(manifest.resourceName(for: .pat) == fixture.pat)
+            #expect(manifest.resourceName(for: .sleep) == fixture.sleep)
+            #expect(manifest.resourceName(for: .personality(.peek)) == fixture.peek)
+            #expect(manifest.resourceName(for: .personality(.perk)) == fixture.perk)
+            #expect(manifest.resourceName(for: .personality(.stretch)) == fixture.stretch)
+            #expect(manifest.resourceName(for: .personality(.proud)) == fixture.proud)
+        }
+    }
+
+    @Test("dog manifest exposes the base fallback resource name")
+    func dogManifestExposesBaseFallback() {
+        let manifest = PetArtworkManifest(petKind: .dog)
+        #expect(manifest.resourceName(for: .idle) == "Pets/Dog/base")
+        #expect(manifest.resourceName(for: .personality(.perk)) == "Pets/Dog/perk")
+        #expect(manifest.fallbackResourceName == "Pets/Dog/base")
     }
 }
 
@@ -190,6 +332,31 @@ struct PetBondTests {
 
 @Suite("Personality moments")
 struct PersonalityMomentTests {
+    @Test("dog moments are enthusiastic and stay dog-specific")
+    func dogMomentsStayDogSpecific() {
+        let dogMoments = PersonalityMomentCatalog.all.filter { $0.petKind == .dog }
+        #expect(dogMoments.count == 12)
+        #expect(Set(dogMoments.map(\.id)).count == 12)
+        for category in PersonalityMomentCategory.allCases {
+            #expect(dogMoments.filter { $0.category == category }.count == 3)
+        }
+        let context = PersonalityMomentContext(
+            petKind: .dog,
+            mood: .sunny,
+            workProgress: 1,
+            requestedCategory: .interaction,
+            isPresentationBlocked: false
+        )
+        let selected = PersonalityMomentSelector.select(
+            from: PersonalityMomentCatalog.all,
+            context: context,
+            excluding: [],
+            roll: 0
+        )
+        #expect(selected?.petKind == .dog)
+        #expect(selected?.category == .interaction)
+    }
+
     @Test("catalog contains twelve unique moments for each pet and three per category")
     func catalogShape() {
         let moments = PersonalityMomentCatalog.all
