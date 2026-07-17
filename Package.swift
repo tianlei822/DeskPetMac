@@ -26,6 +26,11 @@ let package = Package(
             name: "DeskPetCoreTests",
             dependencies: ["DeskPetCore"],
             path: "Tests/DeskPetCoreTests"
+        ),
+        .testTarget(
+            name: "DeskPetMacTests",
+            dependencies: ["DeskPetMac"],
+            path: "Tests/DeskPetMacTests"
         )
     ]
 )

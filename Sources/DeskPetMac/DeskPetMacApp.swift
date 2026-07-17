@@ -9,7 +9,7 @@ struct DeskPetMacApp: App {
     var body: some Scene {
         WindowGroup {
             PetWindowView(model: model)
-                .frame(width: 220, height: 250)
+                .frame(width: 260, height: 290)
                 .task {
                     await model.start()
                 }

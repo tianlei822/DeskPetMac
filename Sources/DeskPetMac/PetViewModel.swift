@@ -28,6 +28,7 @@ final class PetViewModel: ObservableObject {
     private let notifications = BreakNotificationService()
     private let workTracker = WorkSessionTracker()
     private let defaults = UserDefaults.standard
+    private var startupGate = PetStartupGate()
     private var sessionState = WorkSessionState(activeSeconds: 0, lastObservedAt: Date())
     private var monitorTask: Task<Void, Never>?
     private var weatherTask: Task<Void, Never>?
@@ -72,6 +73,7 @@ final class PetViewModel: ObservableObject {
     var bondProgress: Double { bond.levelProgress }
 
     func start() async {
+        guard startupGate.claim() else { return }
         await notifications.requestAuthorization()
         sessionState = workTracker.start()
         startWorkMonitor()

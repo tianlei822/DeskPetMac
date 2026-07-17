@@ -7,7 +7,8 @@ import SwiftUI
 enum PetArtworkLoader {
     private static let cache: NSCache<NSString, NSImage> = {
         let cache = NSCache<NSString, NSImage>()
-        cache.countLimit = 6
+        cache.countLimit = 32
+        cache.totalCostLimit = 64 * 1024 * 1024
         return cache
     }()
     private static var unavailableResources = Set<String>()
@@ -69,13 +70,32 @@ enum PetArtworkLoader {
             cgImage: thumbnail,
             size: NSSize(width: thumbnail.width, height: thumbnail.height)
         )
-        cache.setObject(image, forKey: cacheKey)
+        let cost = thumbnail.bytesPerRow * thumbnail.height
+        cache.setObject(image, forKey: cacheKey, cost: cost)
         return image
     }
 
     static func hasBaseArtwork(for kind: PetKind) -> Bool {
         image(named: PetArtworkManifest(petKind: kind).base) != nil
     }
+
+    static func preloadMotionArtwork(for kind: PetKind) async -> Bool {
+        let manifest = PetArtworkManifest(petKind: kind)
+        var available = Set<String>()
+
+        for resourceName in manifest.motionResourceNames {
+            guard !Task.isCancelled else { return false }
+            if image(named: resourceName) != nil {
+                available.insert(resourceName)
+            }
+            await Task.yield()
+            guard !Task.isCancelled else { return false }
+        }
+
+        guard !Task.isCancelled else { return false }
+        return manifest.hasCompleteMotionSet(availableResourceNames: available)
+    }
+
 }
 
 struct RealisticPetBody: View {
@@ -88,48 +108,110 @@ struct RealisticPetBody: View {
     let personalityPose: PersonalityPose?
     let pointerOffset: CGSize
     let reduceMotion: Bool
+    let motionPreview: PetMotionEvent?
 
     @State private var isShowingPat = false
     @State private var patTask: Task<Void, Never>?
     @State private var patGeneration = 0
+    @State private var motionArtworkReadyKind: PetKind?
+    @State private var motionScheduleClock = PetMotionScheduleClock()
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
+            let strongWeatherReactionActive = PetMotionDirector
+                .isStrongWeatherReactionActive(weatherReaction, time: time)
             let manifest = PetArtworkManifest(petKind: kind)
-            let requested = manifest.resourceName(for: presentationState(at: time))
+            let candidateMotion = scheduledMotion(
+                at: time,
+                isEligible: allowsScheduledMotionBase
+            )
+            let motion = strongWeatherReactionActive
+                ? PetMotionFrame.idle
+                : candidateMotion
+            let requested = requestedResourceName(
+                manifest: manifest,
+                time: time,
+                motion: motion
+            )
             let artwork = PetArtworkLoader.image(named: requested)
                 ?? PetArtworkLoader.image(named: manifest.base)
 
-            if let artwork {
-                ZStack {
-                    artworkImage(artwork)
+            Group {
+                if let artwork {
+                    ZStack {
+                        contactShadow(at: time, motion: motion)
 
-                    PetWeatherArtworkLight(
-                        kind: kind,
-                        mood: mood,
-                        time: time,
-                        reduceMotion: reduceMotion
-                    )
-                    .mask(artworkImage(artwork))
+                        ZStack {
+                            ZStack {
+                                artworkImage(artwork)
 
-                    PetWeatherAccent(
-                        kind: kind,
-                        mood: mood,
-                        time: time,
-                        isVisible: allowsWeatherAccent,
-                        allowsAnimation: allowsWeatherReaction
-                    )
+                                PetWeatherLighting(
+                                    kind: kind,
+                                    mood: mood,
+                                    time: time,
+                                    reduceMotion: reduceMotion
+                                )
+                                .mask(artworkImage(artwork))
+                            }
+                            .frame(width: 190, height: 198)
+                            .clipped()
+
+                            PetWeatherAccent(
+                                kind: kind,
+                                mood: mood,
+                                time: time,
+                                isVisible: allowsWeatherAccent && motion.event == .idle,
+                                allowsAnimation: allowsWeatherReaction
+                            )
+                        }
+                        .frame(width: 190, height: 198)
+                        .shadow(color: .black.opacity(0.16), radius: 8, y: 5)
+                        .scaleEffect(animatedScale(at: time) * weatherScale(at: time))
+                        .rotationEffect(
+                            .degrees(
+                                animatedTilt(at: time)
+                                    + weatherTilt(at: time)
+                                    + motion.tiltDegrees
+                            )
+                        )
+                        .offset(composedOffset(at: time, motion: motion))
+                    }
                 }
-                .frame(width: 166, height: 170)
-                .clipped()
-                .shadow(color: .black.opacity(0.16), radius: 8, y: 5)
-                .scaleEffect(animatedScale(at: time) * weatherScale(at: time))
-                .rotationEffect(.degrees(animatedTilt(at: time) + weatherTilt(at: time)))
-                .offset(composedOffset(at: time))
+            }
+            .onChange(of: strongWeatherReactionActive) {
+                if !allowsScheduledMotionBase {
+                    motionScheduleClock.updateEligibility(false, at: time)
+                } else if strongWeatherReactionActive {
+                    motionScheduleClock.suspendForWeather(
+                        at: time,
+                        preservingElapsed: candidateMotion == .idle
+                    )
+                } else {
+                    motionScheduleClock.resumeAfterWeather(at: time)
+                }
             }
         }
-        .frame(width: 172, height: 178)
+        .frame(width: 220, height: 218)
+        .task(id: kind) {
+            let requestedKind = kind
+            motionArtworkReadyKind = nil
+            motionScheduleClock.updateEligibility(false, at: 0)
+            let isComplete = await PetArtworkLoader.preloadMotionArtwork(
+                for: requestedKind
+            )
+            guard !Task.isCancelled else { return }
+            motionArtworkReadyKind = isComplete ? requestedKind : nil
+        }
+        .onChange(of: allowsScheduledMotionBase) {
+            let time = Date().timeIntervalSinceReferenceDate
+            let strongWeatherReactionActive = PetMotionDirector
+                .isStrongWeatherReactionActive(weatherReaction, time: time)
+            motionScheduleClock.updateEligibility(
+                allowsScheduledMotionBase && !strongWeatherReactionActive,
+                at: time
+            )
+        }
         .onChange(of: pulse) {
             patTask?.cancel()
             patGeneration += 1
@@ -150,29 +232,95 @@ struct RealisticPetBody: View {
         }
     }
 
-    private func presentationState(at time: TimeInterval) -> PetPresentationState {
-        if isSleeping { return .sleep }
-        if let personalityPose { return .personality(personalityPose) }
-        if isShowingPat { return .pat }
-        if isHovering { return .hover }
-        if Int(time * 1.2).isMultiple(of: 7) { return .blink }
-        return .idle
+    private var motionSeed: Int {
+        switch kind {
+        case .cat: 1_031
+        case .pauli: 2_047
+        case .dog: 4_093
+        }
+    }
+
+    private var allowsScheduledMotionBase: Bool {
+        motionArtworkReadyKind == kind
+            && !isSleeping
+            && !isDancing
+            && personalityPose == nil
+            && !isShowingPat
+            && !isHovering
+            && !reduceMotion
+    }
+
+    private func scheduledMotion(
+        at time: TimeInterval,
+        isEligible: Bool
+    ) -> PetMotionFrame {
+        guard isEligible else { return .idle }
+        let relativeTime = motionScheduleClock.elapsed(at: time)
+        if let motionPreview {
+            return PetMotionDirector.previewFrame(
+                pet: kind,
+                event: motionPreview,
+                time: relativeTime,
+                reduceMotion: reduceMotion
+            )
+        }
+        return PetMotionDirector.frame(
+            pet: kind,
+            time: relativeTime,
+            seed: motionSeed,
+            isEligible: true,
+            reduceMotion: reduceMotion
+        )
+    }
+
+    private func requestedResourceName(
+        manifest: PetArtworkManifest,
+        time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> String {
+        if isSleeping { return manifest.resourceName(for: .sleep) }
+        if isShowingPat { return manifest.resourceName(for: .pat) }
+        if isDancing { return manifest.base }
+        if let personalityPose {
+            return manifest.resourceName(for: .personality(personalityPose))
+        }
+        if isHovering { return manifest.resourceName(for: .hover) }
+        if motion.event != .idle {
+            return manifest.resourceName(
+                for: motion.event,
+                frameIndex: motion.artworkFrameIndex
+            )
+        }
+        if Int(time * 1.2).isMultiple(of: 7) {
+            return manifest.resourceName(for: .blink)
+        }
+        return manifest.base
     }
 
     private func animatedScale(at time: TimeInterval) -> CGFloat {
         guard !reduceMotion else { return 1 }
 
         let breathing = sin(time * idleFrequency) * 0.005 * idleAmplitudeMultiplier
-        let hoverEmphasis = isHovering ? 0.02 : 0
         let pulseEmphasis = pulse.isMultiple(of: 2) ? 0 : 0.01
-        return 1 + breathing + hoverEmphasis + pulseEmphasis
+        if isSleeping { return 1 + breathing }
+        if isShowingPat { return 1 + pulseEmphasis }
+        if isDancing || personalityPose != nil { return 1 }
+        if isHovering { return 1.02 }
+        return 1 + breathing
     }
 
     private func animatedTilt(at time: TimeInterval) -> Double {
         guard !reduceMotion else { return 0 }
 
+        if isSleeping || isShowingPat { return 0 }
         if isDancing {
             return sin(time * 9.0) * 7.0
+        }
+        if personalityPose != nil {
+            return personalityTilt(at: time)
+        }
+        if isHovering {
+            return clampedPointerOffset.width * 1.5
         }
 
         let idleTilt: Double = switch kind {
@@ -180,33 +328,43 @@ struct RealisticPetBody: View {
         case .pauli: sin(time * 1.6) * 0.5
         case .dog: sin(time * 3.4) * 0.9
         }
-        let hoverTilt = isHovering ? clampedPointerOffset.width * 1.5 : 0
-        return idleTilt + personalityTilt(at: time) + hoverTilt
+        return idleTilt
     }
 
-    private func animatedOffset(at time: TimeInterval) -> CGSize {
+    private func animatedOffset(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> CGSize {
         guard !reduceMotion else { return .zero }
 
+        if isSleeping || isShowingPat { return .zero }
         if isDancing {
             return CGSize(width: 0, height: abs(sin(time * 9.0)) * -7.0)
         }
+        if personalityPose != nil {
+            return personalityOffset(at: time)
+        }
+        if isHovering {
+            return CGSize(
+                width: clampedPointerOffset.width * 3,
+                height: clampedPointerOffset.height * 2
+            )
+        }
 
-        let idleHeight: CGFloat = switch kind {
+        let idleHeight = idleHeight(at: time, motion: motion)
+        return CGSize(width: 0, height: idleHeight)
+    }
+
+    private func idleHeight(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> CGFloat {
+        guard motion.event == .idle else { return 0 }
+        return switch kind {
         case .cat: sin(time * 2.0) * 1.5 * idleAmplitudeMultiplier
         case .pauli: sin(time * 2.8) * 2.0 * idleAmplitudeMultiplier
         case .dog: sin(time * 2.3) * 1.8 * idleAmplitudeMultiplier
         }
-        let personality = personalityOffset(at: time)
-        let hover = isHovering
-            ? CGSize(
-                width: clampedPointerOffset.width * 3,
-                height: clampedPointerOffset.height * 2
-            )
-            : .zero
-        return CGSize(
-            width: personality.width + hover.width,
-            height: idleHeight + personality.height + hover.height
-        )
     }
 
     private var idleFrequency: Double {
@@ -218,7 +376,7 @@ struct RealisticPetBody: View {
     }
 
     private var weatherReaction: PetWeatherReaction {
-        WeatherAnimationProfile.reaction(for: kind, mood: mood)
+        WeatherSceneProfile.reaction(for: kind, mood: mood)
     }
 
     private var allowsWeatherAccent: Bool {
@@ -247,7 +405,7 @@ struct RealisticPetBody: View {
             .resizable()
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
-            .frame(width: 166, height: 170)
+            .frame(width: 190, height: 198)
     }
 
     private func weatherScale(at time: TimeInterval) -> CGFloat {
@@ -285,13 +443,37 @@ struct RealisticPetBody: View {
         }
     }
 
-    private func composedOffset(at time: TimeInterval) -> CGSize {
-        let existing = animatedOffset(at: time)
+    private func composedOffset(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> CGSize {
+        let existing = animatedOffset(at: time, motion: motion)
         let weather = weatherOffset(at: time)
         return CGSize(
-            width: existing.width + weather.width,
-            height: existing.height + weather.height
+            width: existing.width + weather.width + CGFloat(motion.horizontalOffset),
+            height: existing.height + weather.height + CGFloat(motion.verticalOffset)
         )
+    }
+
+    private func contactShadow(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> some View {
+        let existing = animatedOffset(at: time, motion: motion)
+        let weather = weatherOffset(at: time)
+        let horizontalOffset = existing.width
+            + weather.width
+            + CGFloat(motion.horizontalOffset)
+            + CGFloat(motion.shadowOffset)
+
+        return Ellipse()
+            .fill(Color.black.opacity(0.12))
+            .frame(width: 105, height: 17)
+            .blur(radius: 8)
+            .scaleEffect(x: CGFloat(motion.shadowScale), y: 1)
+            .offset(x: horizontalOffset, y: 79)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     private func weatherOffset(at time: TimeInterval) -> CGSize {

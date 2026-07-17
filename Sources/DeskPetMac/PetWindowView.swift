@@ -2,6 +2,22 @@ import DeskPetCore
 import AppKit
 import SwiftUI
 
+private enum SceneMetrics {
+    static let windowSize = CGSize(width: 260, height: 290)
+    static let weatherSize = CGSize(width: 220, height: 218)
+    static let artworkSize = CGSize(width: 190, height: 198)
+}
+
+enum VectorPetMotionValues {
+    static func pauliStatusPulse(
+        time: TimeInterval,
+        reduceMotion: Bool
+    ) -> Double {
+        guard !reduceMotion else { return 1 }
+        return 0.78 + abs(sin(time * 3.4)) * 0.22
+    }
+}
+
 struct PetWindowView: View {
     @ObservedObject var model: PetViewModel
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -14,8 +30,16 @@ struct PetWindowView: View {
                 Spacer(minLength: 38)
                 ZStack {
                     WeatherBackdrop(mood: displayedMood, reduceMotion: reduceMotion)
-                        .id("weather-back-\(displayedMood.rawValue)")
+                        .id("weather-background-\(displayedMood.rawValue)")
                         .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
+
+                    WeatherMidground(mood: displayedMood, reduceMotion: reduceMotion)
+                        .id("weather-midground-\(displayedMood.rawValue)")
+                        .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
 
                     Button {
                         model.pat()
@@ -31,7 +55,8 @@ struct PetWindowView: View {
                                     isDancing: model.isDancing,
                                     personalityPose: model.activePersonalityMoment?.pose,
                                     pointerOffset: pointerOffset,
-                                    reduceMotion: reduceMotion
+                                    reduceMotion: reduceMotion,
+                                    motionPreview: motionPreview
                                 )
                             } else {
                                 VectorPetBody(
@@ -48,16 +73,25 @@ struct PetWindowView: View {
                         }
                     }
                     .buttonStyle(.plain)
+                    .frame(
+                        width: SceneMetrics.artworkSize.width,
+                        height: SceneMetrics.artworkSize.height
+                    )
                     .accessibilityLabel("Pat \(model.petKind.displayName)")
 
                     WeatherForeground(mood: displayedMood, reduceMotion: reduceMotion)
-                        .id("weather-front-\(displayedMood.rawValue)")
+                        .id("weather-foreground-\(displayedMood.rawValue)")
                         .transition(.opacity)
+                        .allowsHitTesting(false)
+                        .accessibilityHidden(true)
                 }
-                .frame(width: 172, height: 178)
+                .frame(
+                    width: SceneMetrics.weatherSize.width,
+                    height: SceneMetrics.weatherSize.height
+                )
                 .animation(
                     .easeInOut(
-                        duration: WeatherAnimationProfile(mood: displayedMood).transitionDuration
+                        duration: WeatherSceneProfile(mood: displayedMood).transitionDuration
                     ),
                     value: displayedMood
                 )
@@ -73,11 +107,15 @@ struct PetWindowView: View {
 
             HeartParticleOverlay(burst: model.heartBurst, combo: model.comboCount)
                 .allowsHitTesting(false)
-                .offset(y: 78)
+                .offset(y: 92)
 
             bubbleOverlay
                 .padding(.top, 6)
         }
+        .frame(
+            width: SceneMetrics.windowSize.width,
+            height: SceneMetrics.windowSize.height
+        )
         .overlay(alignment: .topTrailing) {
             if model.comboCount >= 2 {
                 ComboBadge(count: model.comboCount)
@@ -124,10 +162,21 @@ struct PetWindowView: View {
         return model.mood
     }
 
+    private var motionPreview: PetMotionEvent? {
+        #if DEBUG
+        guard let raw = ProcessInfo.processInfo.environment["DESKPET_MOTION_PREVIEW"] else {
+            return nil
+        }
+        return PetMotionEvent(rawValue: raw)
+        #else
+        return nil
+        #endif
+    }
+
     private func normalizedPointerOffset(_ location: CGPoint) -> CGSize {
         CGSize(
-            width: min(1, max(-1, (location.x - 110) / 110)),
-            height: min(1, max(-1, (location.y - 125) / 125))
+            width: min(1, max(-1, (location.x - 130) / 130)),
+            height: min(1, max(-1, (location.y - 145) / 145))
         )
     }
 
@@ -393,7 +442,10 @@ private struct VectorPetBody: View {
                 : sin(t * (isDancing ? 9.0 : 5.0)) * (isDancing ? 14 : 8)
             let eyesClosed = isSleeping || Int(t * 1.2) % 7 == 0
             let scale = isHovering ? 1.035 : 1.0
-            let statusPulse = 0.78 + abs(sin(t * 3.4)) * 0.22
+            let statusPulse = VectorPetMotionValues.pauliStatusPulse(
+                time: t,
+                reduceMotion: reduceMotion
+            )
             let danceTilt = reduceMotion ? 0 : (isDancing ? sin(t * 9.0) * 9 : 0)
             let personalityTilt = if reduceMotion {
                 0.0
@@ -451,6 +503,7 @@ private struct VectorPetBody: View {
             .offset(weather.offset)
             .scaleEffect(scale + (pulse.isMultiple(of: 2) ? 0 : 0.015))
         }
+        .frame(width: 220, height: 218)
         .onChange(of: pulse) {
             patTask?.cancel()
             patGeneration += 1
@@ -476,7 +529,7 @@ private struct VectorPetBody: View {
     }
 
     private var weatherReaction: PetWeatherReaction {
-        WeatherAnimationProfile.reaction(for: kind, mood: mood)
+        WeatherSceneProfile.reaction(for: kind, mood: mood)
     }
 
     private var allowsWeatherReaction: Bool {
