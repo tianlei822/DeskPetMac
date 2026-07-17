@@ -13,3 +13,10 @@ DerivedData/
 
 # Distribution artifacts
 dist/
+
+# Local design exploration
+.superpowers/
+tmp/imagegen/
+
+# Local git worktrees
+.worktrees/

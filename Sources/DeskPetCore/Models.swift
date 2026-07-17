@@ -61,11 +61,13 @@ public enum PetWeatherMood: String, CaseIterable, Equatable, Sendable {
 public enum PetKind: String, CaseIterable, Equatable, Sendable {
     case cat
     case pauli
+    case dog
 
     public var displayName: String {
         switch self {
         case .cat: "Cat"
         case .pauli: "Pauli"
+        case .dog: "Dog"
         }
     }
 }

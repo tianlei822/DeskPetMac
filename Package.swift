@@ -17,12 +17,20 @@ let package = Package(
         .executableTarget(
             name: "DeskPetMac",
             dependencies: ["DeskPetCore"],
-            path: "Sources/DeskPetMac"
+            path: "Sources/DeskPetMac",
+            resources: [
+                .copy("Resources/Pets")
+            ]
         ),
         .testTarget(
             name: "DeskPetCoreTests",
             dependencies: ["DeskPetCore"],
             path: "Tests/DeskPetCoreTests"
+        ),
+        .testTarget(
+            name: "DeskPetMacTests",
+            dependencies: ["DeskPetMac"],
+            path: "Tests/DeskPetMacTests"
         )
     ]
 )

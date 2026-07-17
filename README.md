@@ -7,11 +7,16 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 ## Features
 
 - Transparent floating pet window, draggable by background.
-- Click-to-pat interaction with lively bobbing, blinking, tail wagging, and weather accessories.
+- **Character motion / 角色动作** — Cat, Pauli, and Dog occasionally take a few real animated steps and perform distinct idle actions, while pats, dance, sleep, hover, and personality poses keep priority.
+- **Depth-aware weather / 景深天气** — procedural clouds, fog, rain, snow, sunlight, splashes, wet reflections, and natural storm illumination animate around and across the pet without a weather label.
 - **Pat combos** — rapid taps build a multiplier, shown as a `×N combo!` badge.
 - **Floating heart particles** burst out when you pat or make the pet dance.
 - **Bond / affection system** — pats and play grow affection through five levels (New Friend → Soulmate), with hearts and a progress bar in the status bubble. Bond, pet choice, and reminder interval all persist across launches.
 - **Dance action** — tap the ♪ button (or `Cmd+D`) and the pet wiggles, tilts, and earns affection.
+- **Personality moments / 个性时刻** — every so often the pet quietly shares a short, contextual thought without stealing focus or sending a notification.
+- Three distinct companions: a mischievous realistic Cat, curious PBR robot Pauli, and enthusiastic realistic Dog.
+- Choose Cat, Pauli, or Dog from the picker or with `Cmd+1`, `Cmd+2`, and `Cmd+3`.
+- **Distinct voices / 鲜明个性** — Cat is lazy and mischievous, Pauli is earnest and curious, and Dog is enthusiastic and loyal.
 - **Sleep mode** — when you go idle for a while the pet closes its eyes and drifts off with floating `z`s, then wakes the moment you interact.
 - Local weather via CoreLocation + Open-Meteo. If permission or network fails, it falls back to a cozy neutral state.
 - Weather moods: sunny, cloudy, foggy, rainy, snowy, stormy, cozy.
@@ -21,7 +26,7 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 
 ## Shortcuts
 
-- `Cmd+P` pat · `Cmd+D` dance · `Cmd+B` take break · `Cmd+R` refresh weather · `Cmd+1`/`Cmd+2` switch pet · `Cmd+Q` quit.
+- `Cmd+P` pat · `Cmd+D` dance · `Cmd+B` take break · `Cmd+R` refresh weather · `Cmd+1`/`Cmd+2`/`Cmd+3` switch pet · `Cmd+Q` quit.
 
 ## Run
 
@@ -36,6 +41,8 @@ The script builds and opens:
 .build/release/DeskPetMac.app
 ```
 
+The transparent desktop window uses a compact `260 x 290` canvas so weather can render behind and in front of the pet.
+
 第一次运行时，macOS 可能会请求位置和通知权限。
 
 On first launch, macOS may ask for location and notification permissions.
@@ -47,6 +54,22 @@ swift test
 swift build
 scripts/package-app.sh
 ```
+
+Preview a motion event in a debug build:
+
+```bash
+DESKPET_MOTION_PREVIEW=walk swift run DeskPetMac
+```
+
+Supported values: `walk`, `idleAction1`, and `idleAction2`.
+
+Preview a weather mood in a debug build:
+
+```bash
+DESKPET_WEATHER_PREVIEW=rainy swift run DeskPetMac
+```
+
+Supported preview values: `sunny`, `cloudy`, `foggy`, `rainy`, `snowy`, `stormy`, and `cozy`.
 
 ## Release
 

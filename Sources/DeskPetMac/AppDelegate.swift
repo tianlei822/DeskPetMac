@@ -19,6 +19,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @MainActor
     private func configurePetWindow() {
         guard let window = NSApp.windows.first else { return }
+        configurePetWindow(window)
+    }
+
+    @MainActor
+    func configurePetWindow(_ window: NSWindow) {
         window.title = "DeskPet"
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -37,5 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let frame = screen.visibleFrame
             window.setFrameOrigin(NSPoint(x: frame.maxX - 320, y: frame.minY + 120))
         }
+
+        window.orderFrontRegardless()
     }
 }

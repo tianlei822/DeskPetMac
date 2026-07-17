@@ -9,7 +9,7 @@ struct DeskPetMacApp: App {
     var body: some Scene {
         WindowGroup {
             PetWindowView(model: model)
-                .frame(width: 220, height: 250)
+                .frame(width: 260, height: 290)
                 .task {
                     await model.start()
                 }
@@ -26,6 +26,8 @@ struct DeskPetMacApp: App {
                     .keyboardShortcut("1", modifiers: [.command])
                 Button("Use Pauli") { model.selectPetKind(.pauli) }
                     .keyboardShortcut("2", modifiers: [.command])
+                Button("Use Dog") { model.selectPetKind(.dog) }
+                    .keyboardShortcut("3", modifiers: [.command])
                 Button("Take Break") { model.takeBreak() }
                     .keyboardShortcut("b", modifiers: [.command])
                 Button("Refresh Weather") {
