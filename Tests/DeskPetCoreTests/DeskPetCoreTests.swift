@@ -446,7 +446,7 @@ struct PetArtworkManifestTests {
             #expect(manifest.walk.last?.hasSuffix("/walk6") == true)
             #expect(manifest.idleActions.first?.hasSuffix("/idleAction1") == true)
             #expect(manifest.idleActions.last?.hasSuffix("/idleAction2") == true)
-            #expect(manifest.motionResourceNames.count == 8)
+            #expect(manifest.motionResourceNames.count == 11)
         }
     }
 
@@ -490,6 +490,18 @@ struct PetArtworkManifestTests {
             for: PetMotionEvent.idleAction2,
             frameIndex: nil
         ) == "Pets/Dog/idleAction2")
+        #expect(manifest.resourceName(
+            for: PetMotionEvent.lookAround,
+            frameIndex: nil
+        ) == "Pets/Dog/peek")
+        #expect(manifest.resourceName(
+            for: PetMotionEvent.stretch,
+            frameIndex: nil
+        ) == "Pets/Dog/stretch")
+        #expect(manifest.resourceName(
+            for: PetMotionEvent.perkUp,
+            frameIndex: nil
+        ) == "Pets/Dog/perk")
     }
 
     @Test("invalid walk frame indexes use the base artwork")
@@ -511,8 +523,186 @@ struct PetArtworkManifestTests {
     }
 }
 
+@Suite("Pet animation dynamics")
+struct PetAnimationDynamicsTests {
+    @Test("pat response eases from and returns to neutral")
+    func patResponseHasNeutralBoundaries() {
+        for pet in PetKind.allCases {
+            #expect(PetAnimationDynamics.patPose(for: pet, elapsed: 0) == .neutral)
+            #expect(PetAnimationDynamics.patPose(for: pet, elapsed: 0.56) == .neutral)
+
+            let peak = PetAnimationDynamics.patPose(for: pet, elapsed: 0.20)
+            #expect(peak.scale > 1.01)
+            #expect(peak.y < -1)
+            expectFinitePose(peak)
+        }
+    }
+
+    @Test("dance response is smooth and character specific")
+    func danceResponseIsCharacterSpecific() {
+        for pet in PetKind.allCases {
+            #expect(PetAnimationDynamics.dancePose(for: pet, elapsed: 0) == .neutral)
+            #expect(PetAnimationDynamics.dancePose(for: pet, elapsed: 1.8) == .neutral)
+        }
+
+        let cat = PetAnimationDynamics.dancePose(for: .cat, elapsed: 0.65)
+        let pauli = PetAnimationDynamics.dancePose(for: .pauli, elapsed: 0.65)
+        let dog = PetAnimationDynamics.dancePose(for: .dog, elapsed: 0.65)
+        #expect(cat != pauli)
+        #expect(pauli != dog)
+        #expect(cat != dog)
+        expectFinitePose(cat)
+        expectFinitePose(pauli)
+        expectFinitePose(dog)
+    }
+
+    @Test("layered idle motion stays subtle and finite")
+    func idleMotionStaysSubtle() {
+        for pet in PetKind.allCases {
+            for time in stride(from: 0.0, through: 20.0, by: 0.125) {
+                let pose = PetAnimationDynamics.idlePose(for: pet, time: time)
+                #expect(abs(pose.x) <= 0.8)
+                #expect(abs(pose.y) <= 2.2)
+                #expect((0.99...1.01).contains(pose.scale))
+                #expect(abs(pose.tiltDegrees) <= 1.2)
+                expectFinitePose(pose)
+            }
+        }
+    }
+
+    @Test("blinks are brief irregular character beats")
+    func blinkTimingFeelsNatural() {
+        var patterns: [[Bool]] = []
+
+        for pet in PetKind.allCases {
+            let samples = stride(from: 0.0, through: 30.0, by: 0.02).map {
+                PetAnimationDynamics.isBlinking(for: pet, time: $0)
+            }
+            let blinkSamples = samples.filter { $0 }.count
+            #expect(blinkSamples >= 20)
+            #expect(blinkSamples <= 90)
+            #expect(longestRun(in: samples) <= 9)
+            patterns.append(samples)
+        }
+
+        #expect(patterns[0] != patterns[1])
+        #expect(patterns[1] != patterns[2])
+    }
+
+    @Test("cats and dogs have independent finite tail sway")
+    func tailSwayIsIndependentAndCharacterSpecific() {
+        for walking in [false, true] {
+            let catSamples = stride(from: 0.0, through: 4.0, by: 0.1).map {
+                PetAnimationDynamics.tailSwayDegrees(
+                    for: .cat,
+                    time: $0,
+                    isWalking: walking
+                )
+            }
+            let dogSamples = stride(from: 0.0, through: 4.0, by: 0.1).map {
+                PetAnimationDynamics.tailSwayDegrees(
+                    for: .dog,
+                    time: $0,
+                    isWalking: walking
+                )
+            }
+
+            #expect(catSamples.allSatisfy { $0.isFinite })
+            #expect(dogSamples.allSatisfy { $0.isFinite })
+            #expect((catSamples.max() ?? 0) - (catSamples.min() ?? 0) > 2)
+            #expect((dogSamples.max() ?? 0) - (dogSamples.min() ?? 0) > 4)
+            #expect(catSamples != dogSamples)
+            #expect(PetAnimationDynamics.tailSwayDegrees(
+                for: .pauli,
+                time: 1,
+                isWalking: walking
+            ) == 0)
+        }
+    }
+
+    private func expectFinitePose(_ pose: PetAnimationPose) {
+        #expect(pose.x.isFinite)
+        #expect(pose.y.isFinite)
+        #expect(pose.scale.isFinite)
+        #expect(pose.tiltDegrees.isFinite)
+    }
+
+    private func longestRun(in samples: [Bool]) -> Int {
+        var longest = 0
+        var current = 0
+        for sample in samples {
+            current = sample ? current + 1 : 0
+            longest = max(longest, current)
+        }
+        return longest
+    }
+}
+
 @Suite("Pet motion director")
 struct PetMotionDirectorTests {
+    @Test("scheduled motion includes three additional gestures")
+    func scheduledMotionHasExpandedVocabulary() {
+        var observed = Set<PetMotionEvent>()
+
+        for pet in PetKind.allCases {
+            for seed in 0...60 {
+                for time in stride(from: 0.0, through: 180.0, by: 0.08) {
+                    observed.insert(PetMotionDirector.frame(
+                        pet: pet,
+                        time: time,
+                        seed: seed,
+                        isEligible: true,
+                        reduceMotion: false
+                    ).event)
+                }
+            }
+        }
+
+        #expect(observed.contains(.lookAround))
+        #expect(observed.contains(.stretch))
+        #expect(observed.contains(.perkUp))
+    }
+
+    @Test("new gestures ease from neutral and loop cleanly")
+    func gesturePreviewsEaseCleanly() {
+        for pet in PetKind.allCases {
+            for event in [
+                PetMotionEvent.lookAround,
+                .stretch,
+                .perkUp,
+            ] {
+                let duration = PetMotionDirector.eventDuration(for: event, pet: pet)
+                let start = PetMotionDirector.previewFrame(
+                    pet: pet,
+                    event: event,
+                    time: 0,
+                    reduceMotion: false
+                )
+                let middle = PetMotionDirector.previewFrame(
+                    pet: pet,
+                    event: event,
+                    time: duration * 0.5,
+                    reduceMotion: false
+                )
+                let looped = PetMotionDirector.previewFrame(
+                    pet: pet,
+                    event: event,
+                    time: duration,
+                    reduceMotion: false
+                )
+
+                #expect(start.event == event)
+                #expect(start.horizontalOffset == 0)
+                #expect(start.verticalOffset == 0)
+                #expect(start.horizontalScale == 1)
+                #expect(start.verticalScale == 1)
+                #expect(middle != start)
+                expectFiniteTransforms(middle)
+                expectEquivalentMotion(start, looped)
+            }
+        }
+    }
+
     @Test("idle intervals stay between twelve and thirty seconds")
     func idleIntervalsStayBounded() {
         for pet in PetKind.allCases {
@@ -559,6 +749,19 @@ struct PetMotionDirectorTests {
                     #expect(frame.shadowScale >= 0.965)
                     #expect(frame.shadowScale <= 1)
                     #expect(abs(frame.shadowOffset) <= 0.8)
+                    expectFiniteTransforms(frame)
+                case .lookAround, .stretch, .perkUp:
+                    #expect(frame.artworkFrameIndex == nil)
+                    #expect(frame.stepCount == 0)
+                    #expect(frame.eventProgress >= 0)
+                    #expect(frame.eventProgress < 1)
+                    #expect(abs(frame.horizontalOffset) <= 1.5)
+                    #expect(abs(frame.verticalOffset) <= 2.5)
+                    #expect(abs(frame.tiltDegrees) <= 3)
+                    #expect((0.97...1.03).contains(frame.horizontalScale))
+                    #expect((0.97...1.03).contains(frame.verticalScale))
+                    #expect((0.94...1.05).contains(frame.shadowScale))
+                    #expect(abs(frame.shadowOffset) <= 0.9)
                     expectFiniteTransforms(frame)
                 case .idle:
                     break
@@ -637,6 +840,46 @@ struct PetMotionDirectorTests {
         #expect(cat.verticalAmplitude != dog.verticalAmplitude)
     }
 
+    @Test("walk cadence stays at a relaxed natural pace")
+    func walkCadenceStaysRelaxed() {
+        for pet in PetKind.allCases {
+            let cadence = PetMotionDirector.cadence(for: pet, seed: 0)
+            #expect((1.0...1.2).contains(cadence.stepsPerSecond))
+            #expect(abs(
+                cadence.artworkFramesPerSecond - cadence.stepsPerSecond * 6
+            ) < 0.000_001)
+        }
+    }
+
+    @Test("look around turns ease into readable holds")
+    func lookAroundHasReadableHolds() {
+        for pet in PetKind.allCases {
+            let duration = PetMotionDirector.eventDuration(for: .lookAround, pet: pet)
+            let firstArrival = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .lookAround,
+                time: duration * 0.18,
+                reduceMotion: false
+            )
+            let firstHold = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .lookAround,
+                time: duration * 0.28,
+                reduceMotion: false
+            )
+            let center = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .lookAround,
+                time: duration * 0.52,
+                reduceMotion: false
+            )
+
+            #expect(abs(firstArrival.tiltDegrees - firstHold.tiltDegrees) < 0.05)
+            #expect(abs(firstHold.tiltDegrees) >= 1)
+            #expect(abs(center.tiltDegrees) < 0.01)
+        }
+    }
+
     @Test("each pet advances artwork between six and ten frames per second")
     func artworkFrameRatesStayReadable() {
         for pet in PetKind.allCases {
@@ -657,8 +900,8 @@ struct PetMotionDirectorTests {
         }
     }
 
-    @Test("every production step count holds a neutral walk-six landing frame")
-    func productionWalksSettleBeforeReturningToIdle() {
+    @Test("every production step count eases through the walk-six landing frame")
+    func productionWalksEaseBeforeReturningToIdle() {
         var samples: [Int: (
             seed: Int,
             eventStart: Double,
@@ -714,12 +957,136 @@ struct PetMotionDirectorTests {
             #expect(precedingFrame.artworkFrameIndex == 4)
             #expect(settlingFrame.event == .walk)
             #expect(settlingFrame.artworkFrameIndex == 5)
-            #expect(abs(settlingFrame.horizontalOffset) < 0.000_000_001)
-            #expect(abs(settlingFrame.verticalOffset) < 0.000_000_001)
-            #expect(abs(settlingFrame.tiltDegrees) < 0.000_000_001)
-            #expect(abs(settlingFrame.shadowScale - 1) < 0.000_000_001)
-            #expect(abs(settlingFrame.shadowOffset) < 0.000_000_001)
+            #expect(abs(settlingFrame.horizontalOffset) < abs(precedingFrame.horizontalOffset))
+            #expect(abs(settlingFrame.verticalOffset) < abs(precedingFrame.verticalOffset))
+            #expect(abs(settlingFrame.tiltDegrees) < abs(precedingFrame.tiltDegrees))
+            #expect(abs(settlingFrame.shadowScale - 1) < abs(precedingFrame.shadowScale - 1))
+            #expect(abs(settlingFrame.shadowOffset) < abs(precedingFrame.shadowOffset))
             #expect(atCompletion == .idle)
+        }
+    }
+
+    @Test("walk transforms flow continuously into the landing frame")
+    func walkLandingIsContinuous() {
+        for pet in PetKind.allCases {
+            let cadence = PetMotionDirector.cadence(for: pet, seed: 0)
+            let duration = 4 / cadence.stepsPerSecond
+            let oldLandingBoundary = duration - 1 / cadence.artworkFramesPerSecond
+            let before = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: oldLandingBoundary - 0.000_001,
+                reduceMotion: false
+            )
+            let after = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: oldLandingBoundary + 0.000_001,
+                reduceMotion: false
+            )
+
+            #expect(abs(before.horizontalOffset - after.horizontalOffset) < 0.01)
+            #expect(abs(before.verticalOffset - after.verticalOffset) < 0.01)
+            #expect(abs(before.tiltDegrees - after.tiltDegrees) < 0.01)
+            #expect(abs(before.horizontalScale - after.horizontalScale) < 0.01)
+            #expect(abs(before.verticalScale - after.verticalScale) < 0.01)
+        }
+    }
+
+    @Test("walk transition timing presents one gait frame at a time")
+    func walkArtworkUsesSingleTransitionFrame() {
+        for pet in PetKind.allCases {
+            let cadence = PetMotionDirector.cadence(for: pet, seed: 0)
+            let frameDuration = 1 / cadence.artworkFramesPerSecond
+            let early = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: frameDuration * 0.55,
+                reduceMotion: false
+            )
+            let late = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: frameDuration * 0.90,
+                reduceMotion: false
+            )
+
+            #expect(early.artworkFrameIndex == 0)
+            #expect(early.nextArtworkFrameIndex == 1)
+            #expect(early.artworkBlend == 0)
+            #expect(!early.usesEventArtwork)
+            #expect(early.presentedArtworkFrameIndex == nil)
+            #expect(late.artworkFrameIndex == 0)
+            #expect(late.nextArtworkFrameIndex == 1)
+            #expect(late.artworkBlend > 0)
+            #expect(late.artworkBlend < 1)
+            #expect(late.usesEventArtwork)
+            #expect(late.presentedArtworkFrameIndex == 1)
+        }
+    }
+
+    @Test("events select the base pose at both boundaries")
+    func eventArtworkUsesBaseAtBoundaries() {
+        for pet in PetKind.allCases {
+            let cadence = PetMotionDirector.cadence(for: pet, seed: 0)
+            let walkDuration = 4 / cadence.stepsPerSecond
+            let walkStart = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: 0,
+                reduceMotion: false
+            )
+            let walkMiddle = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: walkDuration * 0.5,
+                reduceMotion: false
+            )
+            let walkEnd = PetMotionDirector.previewFrame(
+                pet: pet,
+                event: .walk,
+                time: walkDuration - 0.000_1,
+                reduceMotion: false
+            )
+
+            #expect(walkStart.artworkOpacity == 0)
+            #expect(walkMiddle.artworkOpacity == 1)
+            #expect(walkEnd.artworkOpacity < 0.01)
+            #expect(!walkStart.usesEventArtwork)
+            #expect(walkMiddle.usesEventArtwork)
+            #expect(!walkEnd.usesEventArtwork)
+
+            for event in [
+                PetMotionEvent.idleAction1,
+                .idleAction2,
+                .lookAround,
+                .stretch,
+                .perkUp,
+            ] {
+                let duration = PetMotionDirector.eventDuration(for: event, pet: pet)
+                let start = PetMotionDirector.previewFrame(
+                    pet: pet,
+                    event: event,
+                    time: 0,
+                    reduceMotion: false
+                )
+                let middle = PetMotionDirector.previewFrame(
+                    pet: pet,
+                    event: event,
+                    time: duration * 0.5,
+                    reduceMotion: false
+                )
+                let end = PetMotionDirector.previewFrame(
+                    pet: pet,
+                    event: event,
+                    time: duration - 0.000_1,
+                    reduceMotion: false
+                )
+
+                #expect(start.artworkOpacity == 0)
+                #expect(middle.artworkOpacity == 1)
+                #expect(end.artworkOpacity < 0.01)
+            }
         }
     }
 
@@ -1042,7 +1409,8 @@ struct PetMotionDirectorTests {
         let pet = PetKind.dog
         let seed = 31
         let cadence = PetMotionDirector.cadence(for: pet, seed: seed)
-        let cycleDuration = cadence.idleDuration + 3.2
+        let cycleDuration = cadence.idleDuration
+            + PetMotionDirector.eventWindowDuration
 
         let beforeEvent = PetMotionDirector.frame(
             pet: pet,
@@ -1116,7 +1484,8 @@ struct PetMotionDirectorTests {
         let pet = PetKind.pauli
         let seed = 17
         let cadence = PetMotionDirector.cadence(for: pet, seed: seed)
-        let cycleDuration = cadence.idleDuration + 3.2
+        let cycleDuration = cadence.idleDuration
+            + PetMotionDirector.eventWindowDuration
         let magnitude = Double(Int.max) * 4 * cycleDuration
         let positiveTime = extremeEventTime(
             startingAt: magnitude,
@@ -1160,6 +1529,10 @@ struct PetMotionDirectorTests {
             frame.horizontalOffset,
             frame.verticalOffset,
             frame.tiltDegrees,
+            frame.horizontalScale,
+            frame.verticalScale,
+            frame.artworkBlend,
+            frame.artworkOpacity,
             frame.shadowScale,
             frame.shadowOffset
         ]
@@ -1178,6 +1551,11 @@ struct PetMotionDirectorTests {
         #expect(abs(first.horizontalOffset - second.horizontalOffset) < 0.000_000_001)
         #expect(abs(first.verticalOffset - second.verticalOffset) < 0.000_000_001)
         #expect(abs(first.tiltDegrees - second.tiltDegrees) < 0.000_000_001)
+        #expect(abs(first.horizontalScale - second.horizontalScale) < 0.000_000_001)
+        #expect(abs(first.verticalScale - second.verticalScale) < 0.000_000_001)
+        #expect(first.nextArtworkFrameIndex == second.nextArtworkFrameIndex)
+        #expect(abs(first.artworkBlend - second.artworkBlend) < 0.000_000_001)
+        #expect(abs(first.artworkOpacity - second.artworkOpacity) < 0.000_000_001)
         #expect(abs(first.shadowScale - second.shadowScale) < 0.000_000_001)
         #expect(abs(first.shadowOffset - second.shadowOffset) < 0.000_000_001)
     }
@@ -1187,7 +1565,8 @@ struct PetMotionDirectorTests {
         movingPositive: Bool,
         cadence: PetMotionCadence
     ) -> Double? {
-        let cycleDuration = cadence.idleDuration + 3.2
+        let cycleDuration = cadence.idleDuration
+            + PetMotionDirector.eventWindowDuration
         var candidate = initialValue
 
         for _ in 0..<4_096 {

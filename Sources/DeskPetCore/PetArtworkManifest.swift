@@ -41,7 +41,11 @@ public struct PetArtworkManifest: Equatable, Sendable {
     }
 
     public var motionResourceNames: [String] {
-        walk + idleActions
+        walk + idleActions + [
+            personality[.peek] ?? base,
+            personality[.stretch] ?? base,
+            personality[.perk] ?? base,
+        ]
     }
 
     public func hasCompleteMotionSet(
@@ -83,6 +87,12 @@ public struct PetArtworkManifest: Equatable, Sendable {
             return idleActions[0]
         case .idleAction2:
             return idleActions[1]
+        case .lookAround:
+            return personality[.peek] ?? base
+        case .stretch:
+            return personality[.stretch] ?? base
+        case .perkUp:
+            return personality[.perk] ?? base
         }
     }
 }

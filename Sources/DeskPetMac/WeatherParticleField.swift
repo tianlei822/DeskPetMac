@@ -21,7 +21,7 @@ struct WeatherParticleField: View {
                 let state = particle.state(
                     at: time,
                     speed: depthProfile.speed,
-                    wind: profile.wind,
+                    wind: animatedWind(for: particle),
                     moving: moving
                 )
                 let point = CGPoint(
@@ -94,6 +94,15 @@ struct WeatherParticleField: View {
                 lineCap: .round
             )
         )
+
+        if depth == .foreground {
+            let highlight = context
+            highlight.stroke(
+                path,
+                with: .color(Color.white.opacity(opacity * 0.18)),
+                style: StrokeStyle(lineWidth: 0.45, lineCap: .round)
+            )
+        }
     }
 
     private func drawSnow(
@@ -118,6 +127,19 @@ struct WeatherParticleField: View {
                 Color(red: 0.80, green: 0.90, blue: 1).opacity(opacity)
             )
         )
+
+        if depth == .foreground, diameter >= 5 {
+            let glint = CGRect(
+                x: point.x - diameter * 0.15,
+                y: point.y - diameter * 0.28,
+                width: diameter * 0.24,
+                height: diameter * 0.24
+            )
+            context.fill(
+                Path(ellipseIn: glint),
+                with: .color(Color.white.opacity(opacity * 0.55))
+            )
+        }
     }
 
     private func drawMote(
@@ -148,6 +170,8 @@ struct WeatherParticleField: View {
         size: CGSize
     ) {
         if profile.showsSplashes {
+            var wetContext = context
+            drawWetSurface(in: &wetContext, size: size)
             var splashContext = context
             drawRainSplashes(in: &splashContext, size: size)
         }
@@ -165,21 +189,58 @@ struct WeatherParticleField: View {
                 Path(ellipseIn: rect),
                 with: .color(Color.blue.opacity(0.12))
             )
+
+            lightContext.fill(
+                Path(
+                    ellipseIn: CGRect(
+                        x: size.width * 0.34,
+                        y: size.height * 0.835,
+                        width: size.width * 0.35,
+                        height: 10
+                    )
+                ),
+                with: .color(Color.white.opacity(0.08))
+            )
         }
+    }
+
+    private func drawWetSurface(
+        in context: inout GraphicsContext,
+        size: CGSize
+    ) {
+        let rect = CGRect(
+            x: size.width * 0.16,
+            y: size.height * 0.80,
+            width: size.width * 0.68,
+            height: 28
+        )
+        context.addFilter(.blur(radius: 7))
+        context.fill(
+            Path(ellipseIn: rect),
+            with: .linearGradient(
+                Gradient(colors: [
+                    Color(red: 0.36, green: 0.68, blue: 0.88).opacity(0.03),
+                    Color(red: 0.54, green: 0.78, blue: 0.94).opacity(0.12),
+                    .clear,
+                ]),
+                startPoint: CGPoint(x: rect.minX, y: rect.midY),
+                endPoint: CGPoint(x: rect.maxX, y: rect.midY)
+            )
+        )
     }
 
     private func drawRainSplashes(
         in context: inout GraphicsContext,
         size: CGSize
     ) {
-        for index in 0..<3 {
-            let phase = splashPhase(offset: Double(index) * 0.31)
-            let centerX = size.width * (0.30 + CGFloat(index) * 0.20)
+        for index in 0..<5 {
+            let phase = splashPhase(offset: Double(index) * 0.19)
+            let centerX = size.width * (0.20 + CGFloat(index) * 0.15)
             let rect = CGRect(
-                x: centerX - 10 - phase * 7,
+                x: centerX - 7 - phase * 6,
                 y: size.height * (0.84 + CGFloat(index % 2) * 0.025),
-                width: 20 + phase * 14,
-                height: 5 + phase * 3
+                width: 14 + phase * 12,
+                height: 4 + phase * 3
             )
             context.stroke(
                 Path(ellipseIn: rect),
@@ -196,6 +257,12 @@ struct WeatherParticleField: View {
         let duration = 2.4
         let remainder = (time / duration + offset).truncatingRemainder(dividingBy: 1)
         return CGFloat(remainder >= 0 ? remainder : remainder + 1)
+    }
+
+    private func animatedWind(for particle: WeatherParticleSeed) -> Double {
+        guard moving else { return profile.wind }
+        let gust = 0.84 + sin(time * 0.72 + particle.phase * .pi * 2) * 0.16
+        return profile.wind * gust
     }
 
     private func interpolate(_ range: ClosedRange<Double>, unit: Double) -> Double {
