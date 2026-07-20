@@ -113,6 +113,9 @@ struct RealisticPetBody: View {
     @State private var isShowingPat = false
     @State private var patTask: Task<Void, Never>?
     @State private var patGeneration = 0
+    @State private var patStartedAt: TimeInterval?
+    @State private var danceStartedAt: TimeInterval?
+    @State private var personalityStartedAt: TimeInterval?
     @State private var motionArtworkReadyKind: PetKind?
     @State private var motionScheduleClock = PetMotionScheduleClock()
 
@@ -144,7 +147,11 @@ struct RealisticPetBody: View {
 
                         ZStack {
                             ZStack {
-                                artworkImage(artwork)
+                                animatedArtwork(
+                                    artwork,
+                                    time: time,
+                                    motion: motion
+                                )
 
                                 PetWeatherLighting(
                                     kind: kind,
@@ -167,7 +174,11 @@ struct RealisticPetBody: View {
                         }
                         .frame(width: 190, height: 198)
                         .shadow(color: .black.opacity(0.16), radius: 8, y: 5)
-                        .scaleEffect(animatedScale(at: time) * weatherScale(at: time))
+                        .scaleEffect(
+                            x: composedHorizontalScale(at: time, motion: motion),
+                            y: composedVerticalScale(at: time, motion: motion),
+                            anchor: .bottom
+                        )
                         .rotationEffect(
                             .degrees(
                                 animatedTilt(at: time)
@@ -216,19 +227,31 @@ struct RealisticPetBody: View {
             patTask?.cancel()
             patGeneration += 1
             let generation = patGeneration
+            patStartedAt = Date().timeIntervalSinceReferenceDate
             isShowingPat = true
             patTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(450))
+                try? await Task.sleep(for: .milliseconds(560))
                 guard !Task.isCancelled, generation == patGeneration else { return }
                 isShowingPat = false
                 patTask = nil
             }
+        }
+        .onChange(of: isDancing) {
+            danceStartedAt = isDancing ? Date().timeIntervalSinceReferenceDate : nil
+        }
+        .onChange(of: personalityPose) {
+            personalityStartedAt = personalityPose == nil
+                ? nil
+                : Date().timeIntervalSinceReferenceDate
         }
         .onDisappear {
             patTask?.cancel()
             patTask = nil
             patGeneration += 1
             isShowingPat = false
+            patStartedAt = nil
+            danceStartedAt = nil
+            personalityStartedAt = nil
         }
     }
 
@@ -285,13 +308,15 @@ struct RealisticPetBody: View {
             return manifest.resourceName(for: .personality(personalityPose))
         }
         if isHovering { return manifest.resourceName(for: .hover) }
+        if motion.event == .lookAround { return manifest.base }
         if motion.event != .idle {
+            guard motion.usesEventArtwork else { return manifest.base }
             return manifest.resourceName(
                 for: motion.event,
-                frameIndex: motion.artworkFrameIndex
+                frameIndex: motion.presentedArtworkFrameIndex
             )
         }
-        if Int(time * 1.2).isMultiple(of: 7) {
+        if PetAnimationDynamics.isBlinking(for: kind, time: time) {
             return manifest.resourceName(for: .blink)
         }
         return manifest.base
@@ -300,21 +325,46 @@ struct RealisticPetBody: View {
     private func animatedScale(at time: TimeInterval) -> CGFloat {
         guard !reduceMotion else { return 1 }
 
-        let breathing = sin(time * idleFrequency) * 0.005 * idleAmplitudeMultiplier
-        let pulseEmphasis = pulse.isMultiple(of: 2) ? 0 : 0.01
-        if isSleeping { return 1 + breathing }
-        if isShowingPat { return 1 + pulseEmphasis }
-        if isDancing || personalityPose != nil { return 1 }
+        if isSleeping { return 1 + sin(time * 0.92) * 0.003 }
+        if isShowingPat {
+            return CGFloat(patPose(at: time).scale)
+        }
+        if isDancing {
+            return CGFloat(dancePose(at: time).scale)
+        }
+        if personalityPose != nil { return 1 }
         if isHovering { return 1.02 }
-        return 1 + breathing
+        let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
+        return 1 + CGFloat(idle.scale - 1) * idleAmplitudeMultiplier
+    }
+
+    private func composedHorizontalScale(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> CGFloat {
+        animatedScale(at: time)
+            * weatherScale(at: time)
+            * CGFloat(motion.horizontalScale)
+    }
+
+    private func composedVerticalScale(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> CGFloat {
+        animatedScale(at: time)
+            * weatherScale(at: time)
+            * CGFloat(motion.verticalScale)
     }
 
     private func animatedTilt(at time: TimeInterval) -> Double {
         guard !reduceMotion else { return 0 }
 
-        if isSleeping || isShowingPat { return 0 }
+        if isSleeping { return 0 }
+        if isShowingPat {
+            return patPose(at: time).tiltDegrees
+        }
         if isDancing {
-            return sin(time * 9.0) * 7.0
+            return dancePose(at: time).tiltDegrees
         }
         if personalityPose != nil {
             return personalityTilt(at: time)
@@ -323,12 +373,7 @@ struct RealisticPetBody: View {
             return clampedPointerOffset.width * 1.5
         }
 
-        let idleTilt: Double = switch kind {
-        case .cat: sin(time * 0.9) * 0.7
-        case .pauli: sin(time * 1.6) * 0.5
-        case .dog: sin(time * 3.4) * 0.9
-        }
-        return idleTilt
+        return PetAnimationDynamics.idlePose(for: kind, time: time).tiltDegrees
     }
 
     private func animatedOffset(
@@ -337,9 +382,14 @@ struct RealisticPetBody: View {
     ) -> CGSize {
         guard !reduceMotion else { return .zero }
 
-        if isSleeping || isShowingPat { return .zero }
+        if isSleeping { return .zero }
+        if isShowingPat {
+            let pose = patPose(at: time)
+            return CGSize(width: pose.x, height: pose.y)
+        }
         if isDancing {
-            return CGSize(width: 0, height: abs(sin(time * 9.0)) * -7.0)
+            let pose = dancePose(at: time)
+            return CGSize(width: pose.x, height: pose.y)
         }
         if personalityPose != nil {
             return personalityOffset(at: time)
@@ -351,28 +401,12 @@ struct RealisticPetBody: View {
             )
         }
 
-        let idleHeight = idleHeight(at: time, motion: motion)
-        return CGSize(width: 0, height: idleHeight)
-    }
-
-    private func idleHeight(
-        at time: TimeInterval,
-        motion: PetMotionFrame
-    ) -> CGFloat {
-        guard motion.event == .idle else { return 0 }
-        return switch kind {
-        case .cat: sin(time * 2.0) * 1.5 * idleAmplitudeMultiplier
-        case .pauli: sin(time * 2.8) * 2.0 * idleAmplitudeMultiplier
-        case .dog: sin(time * 2.3) * 1.8 * idleAmplitudeMultiplier
-        }
-    }
-
-    private var idleFrequency: Double {
-        switch kind {
-        case .cat: 2.0
-        case .pauli: 2.8
-        case .dog: 2.3
-        }
+        guard motion.event == .idle else { return .zero }
+        let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
+        return CGSize(
+            width: idle.x,
+            height: idle.y * Double(idleAmplitudeMultiplier)
+        )
     }
 
     private var weatherReaction: PetWeatherReaction {
@@ -406,6 +440,53 @@ struct RealisticPetBody: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
             .frame(width: 190, height: 198)
+    }
+
+    @ViewBuilder
+    private func animatedArtwork(
+        _ artwork: NSImage,
+        time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> some View {
+        if kind == .pauli || reduceMotion || isSleeping {
+            artworkImage(artwork)
+        } else {
+            let sway = PetAnimationDynamics.tailSwayDegrees(
+                for: kind,
+                time: time,
+                isWalking: motion.event == .walk
+            )
+
+            ZStack {
+                artworkImage(artwork)
+                    .mask {
+                        ZStack {
+                            Rectangle().fill(.white)
+                            TailTipMask(kind: kind)
+                                .fill(.white)
+                                .blendMode(.destinationOut)
+                        }
+                        .compositingGroup()
+                    }
+
+                artworkImage(artwork)
+                    .mask {
+                        TailTipMask(kind: kind).fill(.white)
+                    }
+                    .rotationEffect(
+                        .degrees(sway),
+                        anchor: tailRotationAnchor
+                    )
+            }
+        }
+    }
+
+    private var tailRotationAnchor: UnitPoint {
+        switch kind {
+        case .cat: UnitPoint(x: 0.69, y: 0.38)
+        case .dog: UnitPoint(x: 0.58, y: 0.32)
+        case .pauli: .center
+        }
     }
 
     private func weatherScale(at time: TimeInterval) -> CGFloat {
@@ -522,27 +603,82 @@ struct RealisticPetBody: View {
     }
 
     private func personalityOffset(at time: TimeInterval) -> CGSize {
-        switch personalityPose {
+        let elapsed = elapsed(since: personalityStartedAt, at: time)
+        return switch personalityPose {
         case .some(.peek):
-            CGSize(width: sin(time * 2.4) * 3, height: 0)
+            CGSize(width: sin(elapsed * 2.4) * 3, height: 0)
         case .some(.perk):
-            CGSize(width: 0, height: abs(sin(time * 5.8)) * -3)
+            CGSize(width: 0, height: abs(sin(elapsed * 5.8)) * -3)
         case .some(.stretch):
-            CGSize(width: 0, height: sin(time * 2.0) * 3)
+            CGSize(width: 0, height: sin(elapsed * 2.0) * 3)
         case .some(.proud):
-            CGSize(width: sin(time * 2.2) * 1.5, height: 0)
+            CGSize(width: sin(elapsed * 2.2) * 1.5, height: 0)
         case .none:
             .zero
         }
     }
 
     private func personalityTilt(at time: TimeInterval) -> Double {
-        switch personalityPose {
-        case .some(.peek): sin(time * 2.4) * -3
-        case .some(.perk): sin(time * 2.8) * 2
-        case .some(.stretch): sin(time * 2.0) * -1.5
-        case .some(.proud): sin(time * 2.2) * 3
+        let elapsed = elapsed(since: personalityStartedAt, at: time)
+        return switch personalityPose {
+        case .some(.peek): sin(elapsed * 1.25) * -0.45
+        case .some(.perk): sin(elapsed * 1.6) * 0.7
+        case .some(.stretch): sin(elapsed * 2.0) * -1.5
+        case .some(.proud): sin(elapsed * 1.6) * 1.2
         case .none: 0
         }
+    }
+
+    private func patPose(at time: TimeInterval) -> PetAnimationPose {
+        PetAnimationDynamics.patPose(
+            for: kind,
+            elapsed: elapsed(since: patStartedAt, at: time)
+        )
+    }
+
+    private func dancePose(at time: TimeInterval) -> PetAnimationPose {
+        PetAnimationDynamics.dancePose(
+            for: kind,
+            elapsed: elapsed(since: danceStartedAt, at: time)
+        )
+    }
+
+    private func elapsed(
+        since start: TimeInterval?,
+        at time: TimeInterval
+    ) -> TimeInterval {
+        guard let start, time.isFinite else { return 0 }
+        return max(0, time - start)
+    }
+}
+
+private struct TailTipMask: Shape {
+    let kind: PetKind
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        switch kind {
+        case .cat:
+            path.move(to: CGPoint(x: rect.width * 0.50, y: 0))
+            path.addLine(to: CGPoint(x: rect.width, y: 0))
+            path.addLine(to: CGPoint(x: rect.width, y: rect.height * 0.44))
+            path.addLine(to: CGPoint(x: rect.width * 0.67, y: rect.height * 0.44))
+            path.addLine(to: CGPoint(x: rect.width * 0.67, y: rect.height * 0.18))
+            path.addLine(to: CGPoint(x: rect.width * 0.50, y: rect.height * 0.18))
+            path.closeSubpath()
+        case .dog:
+            path.addRoundedRect(
+                in: CGRect(
+                    x: rect.width * 0.38,
+                    y: 0,
+                    width: rect.width * 0.40,
+                    height: rect.height * 0.27
+                ),
+                cornerSize: CGSize(width: 12, height: 12)
+            )
+        case .pauli:
+            break
+        }
+        return path
     }
 }

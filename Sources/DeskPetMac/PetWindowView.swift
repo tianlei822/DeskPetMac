@@ -1,5 +1,4 @@
 import DeskPetCore
-import AppKit
 import SwiftUI
 
 private enum SceneMetrics {
@@ -29,17 +28,32 @@ struct PetWindowView: View {
             VStack(spacing: 6) {
                 Spacer(minLength: 38)
                 ZStack {
-                    WeatherBackdrop(mood: displayedMood, reduceMotion: reduceMotion)
+                    WeatherBackdrop(
+                        mood: displayedMood,
+                        pointerOffset: pointerOffset,
+                        reduceMotion: reduceMotion
+                    )
                         .id("weather-background-\(displayedMood.rawValue)")
                         .transition(.opacity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
 
-                    WeatherMidground(mood: displayedMood, reduceMotion: reduceMotion)
+                    WeatherMidground(
+                        mood: displayedMood,
+                        pointerOffset: pointerOffset,
+                        reduceMotion: reduceMotion
+                    )
                         .id("weather-midground-\(displayedMood.rawValue)")
                         .transition(.opacity)
                         .allowsHitTesting(false)
                         .accessibilityHidden(true)
+
+                    PetInteractionFeedback(
+                        burst: model.heartBurst,
+                        combo: model.comboCount,
+                        reduceMotion: reduceMotion
+                    )
+                    .offset(y: 8)
 
                     Button {
                         model.pat()
@@ -79,7 +93,11 @@ struct PetWindowView: View {
                     )
                     .accessibilityLabel("Pat \(model.petKind.displayName)")
 
-                    WeatherForeground(mood: displayedMood, reduceMotion: reduceMotion)
+                    WeatherForeground(
+                        mood: displayedMood,
+                        pointerOffset: pointerOffset,
+                        reduceMotion: reduceMotion
+                    )
                         .id("weather-foreground-\(displayedMood.rawValue)")
                         .transition(.opacity)
                         .allowsHitTesting(false)
@@ -134,11 +152,16 @@ struct PetWindowView: View {
             }
         }
         .animation(.spring(response: 0.28, dampingFraction: 0.72), value: hover)
+        .animation(
+            reduceMotion
+                ? .linear(duration: 0.08)
+                : .interactiveSpring(response: 0.24, dampingFraction: 0.82),
+            value: pointerOffset
+        )
         .animation(.spring(response: 0.30, dampingFraction: 0.70), value: model.affectionPulse)
         .animation(.spring(response: 0.32, dampingFraction: 0.6), value: model.comboCount)
         .animation(.easeInOut(duration: 0.3), value: model.isSleeping)
         .animation(.easeInOut(duration: 0.22), value: model.isReminderVisible)
-        .animation(.easeInOut(duration: 0.22), value: model.isStatusVisible)
         .animation(
             reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.76),
             value: model.activePersonalityMoment?.id
@@ -150,8 +173,6 @@ struct PetWindowView: View {
         hover
             || model.isPetPickerVisible
             || model.isSettingsVisible
-            || model.isRefreshingWeather
-            || model.isReminderVisible
     }
 
     private var displayedMood: PetWeatherMood {
@@ -185,13 +206,6 @@ struct PetWindowView: View {
         if model.isReminderVisible {
             BreakBubble(model: model)
                 .transition(.move(edge: .top).combined(with: .opacity))
-        } else if hover
-            || model.isStatusVisible
-            || model.isRefreshingWeather
-            || model.isPetPickerVisible
-            || model.isSettingsVisible {
-            StatusBubble(model: model)
-                .transition(.move(edge: .top).combined(with: .opacity))
         } else if let moment = model.activePersonalityMoment {
             PersonalityBubble(moment: moment)
                 .transition(
@@ -200,42 +214,6 @@ struct PetWindowView: View {
                         : .move(edge: .top).combined(with: .opacity)
                 )
         }
-    }
-}
-
-private struct StatusBubble: View {
-    @ObservedObject var model: PetViewModel
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(model.petKind.displayName)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .foregroundStyle(.primary)
-            Text("Focus \(model.activeMinutes)m")
-                .font(.system(size: 9, weight: .medium, design: .rounded))
-                .foregroundStyle(.secondary)
-
-            ProgressView(value: model.workProgress)
-                .controlSize(.small)
-                .tint(.mint)
-                .frame(width: 124)
-                .accessibilityLabel("Focus progress")
-                .accessibilityValue(focusProgressAccessibilityValue)
-
-            BondReadout(model: model)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 14, style: .continuous)
-                .stroke(.white.opacity(0.24), lineWidth: 1)
-        )
-    }
-
-    private var focusProgressAccessibilityValue: String {
-        let progress = min(max(model.workProgress, 0), 1)
-        return "\(Int((progress * 100).rounded()))%"
     }
 }
 
@@ -315,35 +293,12 @@ private struct ControlStrip: View {
             }
 
             Button {
-                model.takeBreak()
-            } label: {
-                Image(systemName: "figure.stand")
-            }
-            .help("Mark break taken")
-            .buttonStyle(PetIconButtonStyle(tint: .mint, isActive: model.workProgress == 0))
-
-            Button {
                 model.dance()
             } label: {
                 Image(systemName: "music.note")
             }
             .help("Make the pet dance")
             .buttonStyle(PetIconButtonStyle(tint: .purple, isActive: model.isDancing))
-
-            Button {
-                Task { await model.refreshWeather() }
-            } label: {
-                Image(systemName: "cloud.sun")
-                    .rotationEffect(.degrees(model.isRefreshingWeather ? 360 : 0))
-                    .animation(
-                        model.isRefreshingWeather
-                            ? .linear(duration: 0.85).repeatForever(autoreverses: false)
-                            : .easeOut(duration: 0.18),
-                        value: model.isRefreshingWeather
-                    )
-            }
-            .help("Refresh weather")
-            .buttonStyle(PetIconButtonStyle(tint: .cyan, isActive: model.isRefreshingWeather))
 
             Button {
                 model.toggleSettings()
@@ -367,14 +322,6 @@ private struct ControlStrip: View {
                 .padding(16)
                 .frame(width: 250)
             }
-
-            Button {
-                NSApp.terminate(nil)
-            } label: {
-                Image(systemName: "xmark")
-            }
-            .help("Quit DeskPet")
-            .buttonStyle(PetIconButtonStyle(tint: .red, isActive: false))
         }
         .opacity(isVisible ? 1 : 0)
         .offset(y: isVisible ? 0 : 5)
@@ -1466,28 +1413,5 @@ private struct ComboBadge: View {
             )
             .overlay(Capsule().stroke(.white.opacity(0.5), lineWidth: 1))
             .shadow(color: .pink.opacity(0.4), radius: 4, y: 1)
-    }
-}
-
-private struct BondReadout: View {
-    @ObservedObject var model: PetViewModel
-
-    var body: some View {
-        VStack(spacing: 3) {
-            HStack(spacing: 3) {
-                ForEach(0..<5, id: \.self) { index in
-                    Image(systemName: index < model.bondHearts ? "heart.fill" : "heart")
-                        .font(.system(size: 8))
-                        .foregroundStyle(index < model.bondHearts ? .pink : .secondary.opacity(0.5))
-                }
-                Text(model.bondTitle)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
-                    .foregroundStyle(.secondary)
-            }
-            ProgressView(value: model.bondProgress)
-                .controlSize(.small)
-                .tint(.pink)
-                .frame(width: 124)
-        }
     }
 }

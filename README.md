@@ -61,7 +61,7 @@ Preview a motion event in a debug build:
 DESKPET_MOTION_PREVIEW=walk swift run DeskPetMac
 ```
 
-Supported values: `walk`, `idleAction1`, and `idleAction2`.
+Supported values: `walk`, `idleAction1`, `idleAction2`, `lookAround`, `stretch`, and `perkUp`.
 
 Preview a weather mood in a debug build:
 

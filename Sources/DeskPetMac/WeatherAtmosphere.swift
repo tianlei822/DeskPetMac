@@ -3,10 +3,16 @@ import SwiftUI
 
 struct WeatherBackdrop: View {
     let mood: PetWeatherMood
+    let pointerOffset: CGSize
     let reduceMotion: Bool
 
     var body: some View {
-        WeatherAtmosphereLayer(mood: mood, layer: .background, reduceMotion: reduceMotion)
+        WeatherAtmosphereLayer(
+            mood: mood,
+            layer: .background,
+            pointerOffset: pointerOffset,
+            reduceMotion: reduceMotion
+        )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -14,10 +20,16 @@ struct WeatherBackdrop: View {
 
 struct WeatherMidground: View {
     let mood: PetWeatherMood
+    let pointerOffset: CGSize
     let reduceMotion: Bool
 
     var body: some View {
-        WeatherAtmosphereLayer(mood: mood, layer: .midground, reduceMotion: reduceMotion)
+        WeatherAtmosphereLayer(
+            mood: mood,
+            layer: .midground,
+            pointerOffset: pointerOffset,
+            reduceMotion: reduceMotion
+        )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -25,10 +37,16 @@ struct WeatherMidground: View {
 
 struct WeatherForeground: View {
     let mood: PetWeatherMood
+    let pointerOffset: CGSize
     let reduceMotion: Bool
 
     var body: some View {
-        WeatherAtmosphereLayer(mood: mood, layer: .foreground, reduceMotion: reduceMotion)
+        WeatherAtmosphereLayer(
+            mood: mood,
+            layer: .foreground,
+            pointerOffset: pointerOffset,
+            reduceMotion: reduceMotion
+        )
             .allowsHitTesting(false)
             .accessibilityHidden(true)
     }
@@ -51,13 +69,20 @@ private enum WeatherLayer: Equatable {
 private struct WeatherAtmosphereLayer: View {
     let mood: PetWeatherMood
     let layer: WeatherLayer
+    let pointerOffset: CGSize
     let reduceMotion: Bool
     private let profile: WeatherSceneProfile
     private let particleSeeds: [WeatherParticleSeed]
 
-    init(mood: PetWeatherMood, layer: WeatherLayer, reduceMotion: Bool) {
+    init(
+        mood: PetWeatherMood,
+        layer: WeatherLayer,
+        pointerOffset: CGSize,
+        reduceMotion: Bool
+    ) {
         self.mood = mood
         self.layer = layer
+        self.pointerOffset = pointerOffset
         self.reduceMotion = reduceMotion
 
         let profile = WeatherSceneProfile(mood: mood)
@@ -73,23 +98,39 @@ private struct WeatherAtmosphereLayer: View {
     private var requiresTimeline: Bool {
         if !particleSeeds.isEmpty { return true }
         if mood == .foggy { return true }
-        return mood == .cloudy && layer == .background
+        return mood == .cloudy && layer != .foreground
     }
 
     @ViewBuilder
     var body: some View {
-        if profile.renderingMode(reduceMotion: reduceMotion) == .staticCue || !requiresTimeline {
-            atmosphere(time: 0, moving: false)
-        } else {
-            TimelineView(
-                .animation(minimumInterval: 1.0 / profile.maximumFramesPerSecond)
-            ) { timeline in
-                atmosphere(
-                    time: timeline.date.timeIntervalSinceReferenceDate,
-                    moving: true
-                )
+        Group {
+            if profile.renderingMode(reduceMotion: reduceMotion) == .staticCue || !requiresTimeline {
+                atmosphere(time: 0, moving: false)
+            } else {
+                TimelineView(
+                    .animation(minimumInterval: 1.0 / profile.maximumFramesPerSecond)
+                ) { timeline in
+                    atmosphere(
+                        time: timeline.date.timeIntervalSinceReferenceDate,
+                        moving: true
+                    )
+                }
             }
         }
+        .offset(parallaxOffset)
+    }
+
+    private var parallaxOffset: CGSize {
+        guard !reduceMotion else { return .zero }
+        let strength: CGFloat = switch layer {
+        case .background: -2.4
+        case .midground: -0.8
+        case .foreground: 1.8
+        }
+        return CGSize(
+            width: pointerOffset.width * strength,
+            height: pointerOffset.height * strength * 0.55
+        )
     }
 
     @ViewBuilder
@@ -122,10 +163,15 @@ private struct WeatherAtmosphereLayer: View {
             cloudyAtmosphere(time: time, moving: moving)
         case .foggy:
             fogAtmosphere(time: time, moving: moving)
-        case .rainy, .snowy:
-            EmptyView()
+        case .rainy:
+            precipitationAtmosphere(time: time, moving: moving, stormy: false)
+        case .snowy:
+            snowyAtmosphere(time: time, moving: moving)
         case .stormy:
-            stormBase()
+            ZStack {
+                precipitationAtmosphere(time: time, moving: moving, stormy: true)
+                stormBase()
+            }
         case .cozy:
             cozyAtmosphere(time: time, moving: moving)
         }
@@ -212,6 +258,23 @@ private struct WeatherAtmosphereLayer: View {
                     opacity: 0.10
                 )
             }
+        } else if layer == .midground {
+            Canvas { context, size in
+                let drift = moving
+                    ? sin(normalizedPhase(time, period: 37) * .pi * 2) * 14
+                    : 0
+                var cloudContext = context
+                drawCloudMass(
+                    in: &cloudContext,
+                    size: size,
+                    center: CGPoint(
+                        x: size.width * 0.44 + drift,
+                        y: size.height * 0.42
+                    ),
+                    scale: 0.58,
+                    opacity: 0.055
+                )
+            }
         }
     }
 
@@ -231,6 +294,135 @@ private struct WeatherAtmosphereLayer: View {
                 opacity: settings.opacity,
                 blur: settings.blur
             )
+        }
+    }
+
+    private func precipitationAtmosphere(
+        time: TimeInterval,
+        moving: Bool,
+        stormy: Bool
+    ) -> some View {
+        Canvas { context, size in
+            switch layer {
+            case .background:
+                let tintOpacity = stormy ? 0.105 : 0.06
+                context.fill(
+                    Path(
+                        roundedRect: CGRect(
+                            x: size.width * 0.08,
+                            y: size.height * 0.04,
+                            width: size.width * 0.84,
+                            height: size.height * 0.82
+                        ),
+                        cornerRadius: 42
+                    ),
+                    with: .linearGradient(
+                        Gradient(colors: [
+                            Color(red: 0.20, green: 0.29, blue: 0.40)
+                                .opacity(tintOpacity),
+                            Color(red: 0.42, green: 0.57, blue: 0.67)
+                                .opacity(tintOpacity * 0.42),
+                            .clear,
+                        ]),
+                        startPoint: CGPoint(x: size.width * 0.5, y: 0),
+                        endPoint: CGPoint(x: size.width * 0.5, y: size.height)
+                    )
+                )
+
+                let firstDrift = moving
+                    ? sin(normalizedPhase(time, period: stormy ? 11 : 23) * .pi * 2) * 10
+                    : 0
+                var firstCloud = context
+                drawCloudMass(
+                    in: &firstCloud,
+                    size: size,
+                    center: CGPoint(x: size.width * 0.24 + firstDrift, y: size.height * 0.13),
+                    scale: stormy ? 1.08 : 0.90,
+                    opacity: stormy ? 0.18 : 0.105
+                )
+
+                let secondDrift = moving
+                    ? sin(normalizedPhase(time, period: stormy ? 15 : 31) * .pi * 2) * -13
+                    : 0
+                var secondCloud = context
+                drawCloudMass(
+                    in: &secondCloud,
+                    size: size,
+                    center: CGPoint(x: size.width * 0.78 + secondDrift, y: size.height * 0.24),
+                    scale: stormy ? 0.88 : 0.70,
+                    opacity: stormy ? 0.15 : 0.08
+                )
+            case .midground:
+                var hazeContext = context
+                hazeContext.addFilter(.blur(radius: 12))
+                let drift = moving
+                    ? sin(normalizedPhase(time, period: 17) * .pi * 2) * 8
+                    : 0
+                hazeContext.fill(
+                    Path(
+                        ellipseIn: CGRect(
+                            x: -22 + drift,
+                            y: size.height * 0.49,
+                            width: size.width + 44,
+                            height: 42
+                        )
+                    ),
+                    with: .color(
+                        Color(red: 0.48, green: 0.64, blue: 0.73)
+                            .opacity(stormy ? 0.045 : 0.032)
+                    )
+                )
+            case .foreground:
+                break
+            }
+        }
+    }
+
+    private func snowyAtmosphere(time: TimeInterval, moving: Bool) -> some View {
+        Canvas { context, size in
+            switch layer {
+            case .background:
+                let center = CGPoint(x: size.width * 0.52, y: size.height * 0.38)
+                context.fill(
+                    Path(ellipseIn: CGRect(x: center.x - 94, y: center.y - 86, width: 188, height: 172)),
+                    with: .radialGradient(
+                        Gradient(colors: [
+                            Color(red: 0.70, green: 0.84, blue: 0.94).opacity(0.09),
+                            Color(red: 0.52, green: 0.68, blue: 0.82).opacity(0.025),
+                            .clear,
+                        ]),
+                        center: center,
+                        startRadius: 4,
+                        endRadius: 94
+                    )
+                )
+
+                let drift = moving
+                    ? sin(normalizedPhase(time, period: 34) * .pi * 2) * 8
+                    : 0
+                var cloudContext = context
+                drawCloudMass(
+                    in: &cloudContext,
+                    size: size,
+                    center: CGPoint(x: size.width * 0.52 + drift, y: size.height * 0.13),
+                    scale: 0.92,
+                    opacity: 0.065
+                )
+            case .midground:
+                var veilContext = context
+                veilContext.addFilter(.blur(radius: 13))
+                veilContext.fill(
+                    Path(ellipseIn: CGRect(x: -10, y: size.height * 0.58, width: size.width + 20, height: 38)),
+                    with: .color(Color.white.opacity(0.025))
+                )
+            case .foreground:
+                var driftContext = context
+                driftContext.addFilter(.blur(radius: 5))
+                driftContext.fill(
+                    Path(ellipseIn: CGRect(x: size.width * 0.10, y: size.height * 0.84, width: size.width * 0.80, height: 20)),
+                    with: .color(Color(red: 0.72, green: 0.86, blue: 1).opacity(0.075))
+                )
+            }
         }
     }
 
