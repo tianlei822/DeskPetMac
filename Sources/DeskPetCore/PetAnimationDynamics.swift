@@ -37,15 +37,34 @@ public enum PetAnimationDynamics {
         guard time.isFinite else { return .neutral }
 
         let tuning = idleTuning(for: pet)
-        let breath = sin(time * tuning.breathFrequency + tuning.phase)
+        let breathPhase = time * tuning.breathFrequency + tuning.phase
+        let breath = sin(breathPhase) + sin(breathPhase * 2 - 0.65) * 0.12
         let weightShift = sin(time * tuning.shiftFrequency + tuning.phase * 1.7)
         let secondary = sin(time * tuning.secondaryFrequency + tuning.phase * 0.6)
+        let attentionWave = sin(
+            time * tuning.shiftFrequency * 0.55 + tuning.phase * 2.2
+        )
+        let attention = pow(max(0, attentionWave), 6)
+        let attentionDirection = sin(
+            time * tuning.secondaryFrequency * 0.19 + tuning.phase
+        )
+        let attentionLift: Double = switch pet {
+        case .cat: 0.32
+        case .pauli: 0.24
+        case .dog: 0.40
+        }
 
         return PetAnimationPose(
             x: weightShift * tuning.horizontalAmplitude,
-            y: breath * tuning.verticalAmplitude + secondary * tuning.secondaryAmplitude,
-            scale: 1 + breath * tuning.scaleAmplitude,
-            tiltDegrees: weightShift * tuning.tiltAmplitude + secondary * 0.12
+            y: breath * tuning.verticalAmplitude
+                + secondary * tuning.secondaryAmplitude
+                - attention * attentionLift,
+            scale: 1
+                + breath * tuning.scaleAmplitude
+                + attention * 0.0008,
+            tiltDegrees: weightShift * tuning.tiltAmplitude
+                + secondary * 0.12
+                + attentionDirection * attention * 0.28
         )
     }
 

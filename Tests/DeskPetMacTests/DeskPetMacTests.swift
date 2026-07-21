@@ -1,4 +1,5 @@
 import AppKit
+import DeskPetCore
 import Testing
 @testable import DeskPetMac
 
@@ -33,6 +34,39 @@ struct DeskPetAppLifecycleTests {
         #expect(window.level == .floating)
         window.orderOut(nil)
     }
+
+    @Test("window configuration installs one drag gesture")
+    @MainActor
+    func windowConfigurationInstallsOneDragGesture() {
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 120, width: 260, height: 290),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let delegate = AppDelegate()
+
+        delegate.configurePetWindow(window)
+        delegate.configurePetWindow(window)
+
+        let dragGestures = window.contentView?.gestureRecognizers.filter {
+            $0 is PetWindowDragGestureRecognizer
+        }
+        #expect(dragGestures?.count == 1)
+        window.orderOut(nil)
+    }
+
+    @Test("screen-space drag preserves the exact pointer distance")
+    @MainActor
+    func screenSpaceDragPreservesExactPointerDistance() {
+        let origin = PetWindowDragGestureRecognizer.windowOrigin(
+            startingAt: NSPoint(x: 120, y: 120),
+            pointerStartedAt: NSPoint(x: 320, y: 200),
+            pointerNowAt: NSPoint(x: 380, y: 240)
+        )
+
+        #expect(origin == NSPoint(x: 180, y: 160))
+    }
 }
 
 @Suite("Vector pet motion values")
@@ -50,5 +84,35 @@ struct VectorPetMotionValuesTests {
 
         #expect(first == later)
         #expect(first == 1)
+    }
+}
+
+@Suite("Pet artwork blending")
+struct PetArtworkBlendTests {
+    @Test("motion artwork crossfade keeps total opacity normalized")
+    func motionArtworkCrossfadeKeepsOpacityNormalized() {
+        let motion = PetMotionFrame(
+            event: .walk,
+            artworkFrameIndex: 2,
+            nextArtworkFrameIndex: 3,
+            artworkBlend: 0.25,
+            artworkOpacity: 0.8,
+            stepCount: 3,
+            eventProgress: 0.5,
+            horizontalOffset: 0,
+            verticalOffset: 0,
+            tiltDegrees: 0,
+            shadowScale: 1,
+            shadowOffset: 0
+        )
+
+        let blend = PetArtworkBlend(motion: motion)
+
+        #expect(abs(blend.baseOpacity - 0.2) < 0.000_001)
+        #expect(abs(blend.currentOpacity - 0.6) < 0.000_001)
+        #expect(abs(blend.nextOpacity - 0.2) < 0.000_001)
+        #expect(abs(
+            blend.baseOpacity + blend.currentOpacity + blend.nextOpacity - 1
+        ) < 0.000_001)
     }
 }

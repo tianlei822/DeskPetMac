@@ -1,3 +1,4 @@
+import AppKit
 import DeskPetCore
 import SwiftUI
 
@@ -142,6 +143,11 @@ struct PetWindowView: View {
             }
         }
         .background(.clear)
+        .contextMenu {
+            Button("Close DeskPet") {
+                NSApp.terminate(nil)
+            }
+        }
         .onHover { hover = $0 }
         .onContinuousHover(coordinateSpace: .local) { phase in
             switch phase {
