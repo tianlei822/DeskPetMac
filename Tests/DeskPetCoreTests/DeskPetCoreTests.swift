@@ -703,13 +703,13 @@ struct PetMotionDirectorTests {
         }
     }
 
-    @Test("idle intervals stay between twelve and thirty seconds")
+    @Test("idle intervals stay lively without becoming distracting")
     func idleIntervalsStayBounded() {
         for pet in PetKind.allCases {
-            for seed in [0, 1, 17, Int.max, Int.min] {
+            for seed in 0...100 {
                 let cadence = PetMotionDirector.cadence(for: pet, seed: seed)
-                #expect(cadence.idleDuration >= 12)
-                #expect(cadence.idleDuration <= 30)
+                #expect(cadence.idleDuration >= 9)
+                #expect(cadence.idleDuration <= 22)
             }
         }
     }
@@ -1310,11 +1310,13 @@ struct PetMotionDirectorTests {
         let cadence = PetMotionDirector.cadence(for: pet, seed: seed)
         var clock = PetMotionScheduleClock()
 
-        #expect(cadence.idleDuration == 15)
-        let firstBurstEnd = 1.28
-        clock.updateEligibility(true, at: firstBurstEnd)
-
         let nextBurstStart = 16.0
+        let elapsedBeforeBurst = cadence.idleDuration - 0.28
+        clock.updateEligibility(
+            true,
+            at: nextBurstStart - elapsedBeforeBurst
+        )
+
         let candidate = PetMotionDirector.frame(
             pet: pet,
             time: clock.elapsed(at: nextBurstStart),
@@ -1323,7 +1325,9 @@ struct PetMotionDirectorTests {
             reduceMotion: false
         )
         #expect(candidate == .idle)
-        #expect(abs(clock.elapsed(at: nextBurstStart) - 14.72) < 0.000_000_001)
+        #expect(abs(
+            clock.elapsed(at: nextBurstStart) - elapsedBeforeBurst
+        ) < 0.000_000_001)
         #expect(PetMotionDirector.isStrongWeatherReactionActive(
             .shake,
             time: nextBurstStart
@@ -1338,7 +1342,9 @@ struct PetMotionDirectorTests {
             .shake,
             time: nextBurstEnd
         ))
-        #expect(abs(clock.elapsed(at: nextBurstEnd) - 14.72) < 0.000_000_001)
+        #expect(abs(
+            clock.elapsed(at: nextBurstEnd) - elapsedBeforeBurst
+        ) < 0.000_000_001)
         clock.resumeAfterWeather(at: nextBurstEnd)
 
         let actionTime = nextBurstEnd + 0.29

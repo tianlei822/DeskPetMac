@@ -182,7 +182,7 @@ public enum PetMotionDirector {
     }
 
     public static func cadence(for pet: PetKind, seed: Int) -> PetMotionCadence {
-        let idleDuration = 12 + Double(positiveHash(seed, salt: pet.hashSalt) % 19)
+        let idleDuration = 9 + Double(positiveHash(seed, salt: pet.hashSalt) % 14)
 
         switch pet {
         case .cat:

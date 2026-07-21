@@ -3,6 +3,23 @@ import DeskPetCore
 import ImageIO
 import SwiftUI
 
+struct PetArtworkBlend {
+    let baseOpacity: Double
+    let currentOpacity: Double
+    let nextOpacity: Double
+
+    init(motion: PetMotionFrame) {
+        let eventOpacity = min(1, max(0, motion.artworkOpacity))
+        let nextFrameBlend = motion.nextArtworkFrameIndex == nil
+            ? 0
+            : min(1, max(0, motion.artworkBlend))
+
+        baseOpacity = 1 - eventOpacity
+        currentOpacity = eventOpacity * (1 - nextFrameBlend)
+        nextOpacity = eventOpacity * nextFrameBlend
+    }
+}
+
 @MainActor
 enum PetArtworkLoader {
     private static let cache: NSCache<NSString, NSImage> = {
@@ -137,18 +154,18 @@ struct RealisticPetBody: View {
                 time: time,
                 motion: motion
             )
-            let artwork = PetArtworkLoader.image(named: requested)
+            let maskArtwork = PetArtworkLoader.image(named: requested)
                 ?? PetArtworkLoader.image(named: manifest.base)
 
             Group {
-                if let artwork {
+                if let maskArtwork {
                     ZStack {
                         contactShadow(at: time, motion: motion)
 
                         ZStack {
                             ZStack {
-                                animatedArtwork(
-                                    artwork,
+                                displayedArtwork(
+                                    manifest: manifest,
                                     time: time,
                                     motion: motion
                                 )
@@ -159,7 +176,7 @@ struct RealisticPetBody: View {
                                     time: time,
                                     reduceMotion: reduceMotion
                                 )
-                                .mask(artworkImage(artwork))
+                                .mask(artworkImage(maskArtwork))
                             }
                             .frame(width: 190, height: 198)
                             .clipped()
@@ -333,8 +350,10 @@ struct RealisticPetBody: View {
             return CGFloat(dancePose(at: time).scale)
         }
         if personalityPose != nil { return 1 }
-        if isHovering { return 1.02 }
         let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
+        if isHovering {
+            return 1.018 + CGFloat(idle.scale - 1) * 0.4
+        }
         return 1 + CGFloat(idle.scale - 1) * idleAmplitudeMultiplier
     }
 
@@ -370,7 +389,8 @@ struct RealisticPetBody: View {
             return personalityTilt(at: time)
         }
         if isHovering {
-            return clampedPointerOffset.width * 1.5
+            let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
+            return clampedPointerOffset.width * 1.5 + idle.tiltDegrees * 0.25
         }
 
         return PetAnimationDynamics.idlePose(for: kind, time: time).tiltDegrees
@@ -395,13 +415,13 @@ struct RealisticPetBody: View {
             return personalityOffset(at: time)
         }
         if isHovering {
+            let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
             return CGSize(
-                width: clampedPointerOffset.width * 3,
-                height: clampedPointerOffset.height * 2
+                width: clampedPointerOffset.width * 3 + idle.x * 0.35,
+                height: clampedPointerOffset.height * 2 + idle.y * 0.35
             )
         }
 
-        guard motion.event == .idle else { return .zero }
         let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
         return CGSize(
             width: idle.x,
@@ -440,6 +460,71 @@ struct RealisticPetBody: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
             .frame(width: 190, height: 198)
+    }
+
+    @ViewBuilder
+    private func displayedArtwork(
+        manifest: PetArtworkManifest,
+        time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> some View {
+        if motion.event != .idle, motion.event != .lookAround {
+            let blend = PetArtworkBlend(motion: motion)
+            ZStack {
+                motionArtwork(
+                    named: manifest.base,
+                    opacity: blend.baseOpacity,
+                    time: time,
+                    motion: motion
+                )
+                motionArtwork(
+                    named: manifest.resourceName(
+                        for: motion.event,
+                        frameIndex: motion.artworkFrameIndex
+                    ),
+                    opacity: blend.currentOpacity,
+                    time: time,
+                    motion: motion
+                )
+                if let nextArtworkFrameIndex = motion.nextArtworkFrameIndex {
+                    motionArtwork(
+                        named: manifest.resourceName(
+                            for: motion.event,
+                            frameIndex: nextArtworkFrameIndex
+                        ),
+                        opacity: blend.nextOpacity,
+                        time: time,
+                        motion: motion
+                    )
+                }
+            }
+            .compositingGroup()
+        } else {
+            let requested = requestedResourceName(
+                manifest: manifest,
+                time: time,
+                motion: motion
+            )
+            if let artwork = PetArtworkLoader.image(named: requested)
+                ?? PetArtworkLoader.image(named: manifest.base) {
+                animatedArtwork(artwork, time: time, motion: motion)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func motionArtwork(
+        named resourceName: String,
+        opacity: Double,
+        time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> some View {
+        if opacity > 0,
+           let artwork = PetArtworkLoader.image(named: resourceName)
+            ?? PetArtworkLoader.image(named: PetArtworkManifest(petKind: kind).base) {
+            animatedArtwork(artwork, time: time, motion: motion)
+                .opacity(opacity)
+        }
     }
 
     @ViewBuilder

@@ -1,4 +1,5 @@
 import AppKit
+import DeskPetCore
 import Testing
 @testable import DeskPetMac
 
@@ -83,5 +84,35 @@ struct VectorPetMotionValuesTests {
 
         #expect(first == later)
         #expect(first == 1)
+    }
+}
+
+@Suite("Pet artwork blending")
+struct PetArtworkBlendTests {
+    @Test("motion artwork crossfade keeps total opacity normalized")
+    func motionArtworkCrossfadeKeepsOpacityNormalized() {
+        let motion = PetMotionFrame(
+            event: .walk,
+            artworkFrameIndex: 2,
+            nextArtworkFrameIndex: 3,
+            artworkBlend: 0.25,
+            artworkOpacity: 0.8,
+            stepCount: 3,
+            eventProgress: 0.5,
+            horizontalOffset: 0,
+            verticalOffset: 0,
+            tiltDegrees: 0,
+            shadowScale: 1,
+            shadowOffset: 0
+        )
+
+        let blend = PetArtworkBlend(motion: motion)
+
+        #expect(abs(blend.baseOpacity - 0.2) < 0.000_001)
+        #expect(abs(blend.currentOpacity - 0.6) < 0.000_001)
+        #expect(abs(blend.nextOpacity - 0.2) < 0.000_001)
+        #expect(abs(
+            blend.baseOpacity + blend.currentOpacity + blend.nextOpacity - 1
+        ) < 0.000_001)
     }
 }
