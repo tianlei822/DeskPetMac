@@ -41,7 +41,8 @@ final class PetViewModel: ObservableObject {
     private var statusRevealToken = 0
     private var lastPatAt: Date?
 
-    private let comboWindow: TimeInterval = 1.4
+    private let comboWindow: TimeInterval = 1.8
+    private let comboResetDelay: TimeInterval = 2.2
     private let sleepIdleThreshold: TimeInterval = 90
 
     private enum StoreKey {
@@ -191,8 +192,14 @@ final class PetViewModel: ObservableObject {
 
     private func scheduleComboReset() {
         comboResetTask?.cancel()
+        let resetDelay = comboResetDelay
         comboResetTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.6))
+            do {
+                try await Task.sleep(for: .seconds(resetDelay))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled else { return }
             self?.comboCount = 0
         }
     }

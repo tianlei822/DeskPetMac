@@ -9,7 +9,7 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 - Transparent floating pet window, draggable by background.
 - **Character motion / 角色动作** — Cat, Pauli, and Dog occasionally take a few real animated steps and perform distinct idle actions, while pats, dance, sleep, hover, and personality poses keep priority.
 - **Depth-aware weather / 景深天气** — procedural clouds, fog, rain, snow, sunlight, splashes, wet reflections, and natural storm illumination animate around and across the pet without a weather label.
-- **Pat combos** — rapid taps build a multiplier, shown as a `×N combo!` badge.
+- **Pat combos** — rapid taps build from a soft bounce into a 5+ hit starburst celebration, with a longer-lived `×N` badge.
 - **Floating heart particles** burst out when you pat or make the pet dance.
 - **Bond / affection system** — pats and play grow affection through five levels (New Friend → Soulmate), with hearts and a progress bar in the status bubble. Bond, pet choice, and reminder interval all persist across launches.
 - **Dance action** — tap the ♪ button (or `Cmd+D`) and the pet wiggles, tilts, and earns affection.

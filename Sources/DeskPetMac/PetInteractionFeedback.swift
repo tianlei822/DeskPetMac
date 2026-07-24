@@ -29,7 +29,8 @@ struct PetInteractionFeedback: View {
         let pulse = InteractionPulse(
             id: nextID,
             strength: min(1, 0.55 + Double(combo) * 0.08),
-            phase: Double(nextID % 7) * 0.73
+            phase: Double(nextID % 7) * 0.73,
+            isCelebration: combo >= 5
         )
         nextID += 1
         pulses.append(pulse)
@@ -45,6 +46,7 @@ private struct InteractionPulse: Identifiable {
     let id: Int
     let strength: Double
     let phase: Double
+    let isCelebration: Bool
 }
 
 private struct InteractionPulseView: View {
@@ -72,7 +74,23 @@ private struct InteractionPulseView: View {
                 .scaleEffect(reduceMotion ? 1 : (expanded ? 1.55 : 0.62))
                 .opacity(expanded ? 0 : 0.72)
 
-            ForEach(0..<5, id: \.self) { index in
+            if pulse.isCelebration {
+                Circle()
+                    .stroke(
+                        Color.yellow.opacity(0.72),
+                        style: StrokeStyle(
+                            lineWidth: 1.6,
+                            lineCap: .round,
+                            dash: [2, 7]
+                        )
+                    )
+                    .frame(width: 92, height: 92)
+                    .scaleEffect(reduceMotion ? 1 : (expanded ? 1.45 : 0.55))
+                    .rotationEffect(.degrees(expanded && !reduceMotion ? 34 : 0))
+                    .opacity(expanded ? 0 : 0.9)
+            }
+
+            ForEach(0..<sparkleCount, id: \.self) { index in
                 sparkle(index: index)
             }
         }
@@ -83,14 +101,30 @@ private struct InteractionPulseView: View {
         }
     }
 
+    private var sparkleCount: Int {
+        pulse.isCelebration ? 9 : 5
+    }
+
     private func sparkle(index: Int) -> some View {
-        let angle = pulse.phase + Double(index) * (.pi * 2 / 5)
-        let distance = reduceMotion ? 28.0 : (expanded ? 66.0 : 22.0)
+        let angle = pulse.phase + Double(index) * (.pi * 2 / Double(sparkleCount))
+        let finalDistance = pulse.isCelebration ? 76.0 : 66.0
+        let distance = reduceMotion ? 28.0 : (expanded ? finalDistance : 22.0)
         let x = cos(angle) * distance
         let y = sin(angle) * distance * 0.72
 
-        return Image(systemName: index.isMultiple(of: 2) ? "sparkle" : "circle.fill")
-            .font(.system(size: index.isMultiple(of: 2) ? 9 : 4, weight: .bold))
+        return Image(
+            systemName: pulse.isCelebration && index.isMultiple(of: 3)
+                ? "star.fill"
+                : index.isMultiple(of: 2) ? "sparkle" : "circle.fill"
+        )
+            .font(
+                .system(
+                    size: pulse.isCelebration && index.isMultiple(of: 3)
+                        ? 10
+                        : index.isMultiple(of: 2) ? 9 : 4,
+                    weight: .bold
+                )
+            )
             .foregroundStyle(index.isMultiple(of: 2) ? Color.yellow : Color.pink)
             .shadow(color: .orange.opacity(0.36), radius: 3)
             .offset(x: x, y: y)

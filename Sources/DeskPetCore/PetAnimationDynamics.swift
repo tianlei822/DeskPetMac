@@ -27,8 +27,15 @@ public struct PetAnimationPose: Equatable, Sendable {
 }
 
 public enum PetAnimationDynamics {
-    public static let patDuration = 0.56
     public static let danceDuration = 1.8
+
+    public static func patDuration(comboCount: Int) -> Double {
+        switch comboCount {
+        case 5...: 0.82
+        case 3...: 0.68
+        default: 0.56
+        }
+    }
 
     public static func idlePose(
         for pet: PetKind,
@@ -72,25 +79,80 @@ public enum PetAnimationDynamics {
         for pet: PetKind,
         elapsed: Double
     ) -> PetAnimationPose {
-        guard elapsed.isFinite, elapsed > 0, elapsed < patDuration else {
+        patPose(for: pet, elapsed: elapsed, comboCount: 1)
+    }
+
+    public static func patPose(
+        for pet: PetKind,
+        elapsed: Double,
+        comboCount: Int
+    ) -> PetAnimationPose {
+        let duration = patDuration(comboCount: comboCount)
+        guard elapsed.isFinite, elapsed > 0, elapsed < duration else {
             return .neutral
         }
 
-        let progress = elapsed / patDuration
+        let progress = elapsed / duration
         let lift = pow(sin(progress * .pi), 0.82)
         let settle = sin(progress * .pi * 2) * sin(progress * .pi)
         let direction = pet == .cat ? -1.0 : 1.0
-        let energy: Double = switch pet {
+        let characterEnergy: Double = switch pet {
         case .cat: 0.88
         case .pauli: 0.72
         case .dog: 1.15
         }
+        let comboEnergy: Double = switch comboCount {
+        case 5...: 1.72
+        case 3...: 1.34
+        default: 1
+        }
+        let energy = characterEnergy * comboEnergy
+        let celebrationWiggle = comboCount >= 5
+            ? sin(progress * .pi * 4) * sin(progress * .pi) * 0.9
+            : 0
 
         return PetAnimationPose(
-            x: direction * settle * 1.15 * energy,
+            x: direction * (settle * 1.15 + celebrationWiggle) * energy,
             y: -lift * 4.2 * energy,
             scale: 1 + lift * 0.035 * energy,
-            tiltDegrees: direction * settle * 2.2 * energy
+            tiltDegrees: direction
+                * (settle * 2.2 + celebrationWiggle * 1.4)
+                * energy
+        )
+    }
+
+    public static func attentionPose(
+        for pet: PetKind,
+        pointerX: Double,
+        pointerY: Double,
+        time: Double
+    ) -> PetAnimationPose {
+        guard pointerX.isFinite, pointerY.isFinite, time.isFinite else {
+            return .neutral
+        }
+
+        let x = min(1, max(-1, pointerX))
+        let y = min(1, max(-1, pointerY))
+        let tuning: (
+            horizontal: Double,
+            vertical: Double,
+            scale: Double,
+            tilt: Double,
+            frequency: Double,
+            phase: Double
+        ) = switch pet {
+        case .cat: (3.5, 2.2, 0.019, 2.2, 2.4, 0.7)
+        case .pauli: (3.0, 1.8, 0.017, 1.8, 3.1, 1.9)
+        case .dog: (4.2, 2.7, 0.022, 2.7, 2.8, 2.8)
+        }
+        let curiosity = max(abs(x), abs(y))
+        let microLift = sin(time * tuning.frequency + tuning.phase) * 0.22
+
+        return PetAnimationPose(
+            x: x * tuning.horizontal,
+            y: y * tuning.vertical + microLift,
+            scale: 1 + tuning.scale + curiosity * 0.003,
+            tiltDegrees: x * tuning.tilt
         )
     }
 
