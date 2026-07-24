@@ -116,3 +116,58 @@ struct PetArtworkBlendTests {
         ) < 0.000_001)
     }
 }
+
+@Suite("Pet artwork animation policy")
+struct PetArtworkAnimationPolicyTests {
+    @Test("alternate pose artwork stays in one layer")
+    func alternatePoseArtworkStaysWhole() {
+        for pet in [PetKind.cat, .dog] {
+            #expect(!PetArtworkAnimationPolicy.usesIndependentTailLayer(
+                for: pet,
+                reduceMotion: false,
+                isSleeping: false,
+                isHovering: true,
+                isShowingPat: false,
+                hasPersonalityPose: false
+            ))
+            #expect(!PetArtworkAnimationPolicy.usesIndependentTailLayer(
+                for: pet,
+                reduceMotion: false,
+                isSleeping: false,
+                isHovering: false,
+                isShowingPat: true,
+                hasPersonalityPose: false
+            ))
+            #expect(!PetArtworkAnimationPolicy.usesIndependentTailLayer(
+                for: pet,
+                reduceMotion: false,
+                isSleeping: false,
+                isHovering: false,
+                isShowingPat: false,
+                hasPersonalityPose: true
+            ))
+        }
+    }
+
+    @Test("base cat and dog artwork can animate the tail independently")
+    func baseArtworkCanAnimateTail() {
+        for pet in [PetKind.cat, .dog] {
+            #expect(PetArtworkAnimationPolicy.usesIndependentTailLayer(
+                for: pet,
+                reduceMotion: false,
+                isSleeping: false,
+                isHovering: false,
+                isShowingPat: false,
+                hasPersonalityPose: false
+            ))
+        }
+        #expect(!PetArtworkAnimationPolicy.usesIndependentTailLayer(
+            for: .pauli,
+            reduceMotion: false,
+            isSleeping: false,
+            isHovering: false,
+            isShowingPat: false,
+            hasPersonalityPose: false
+        ))
+    }
+}

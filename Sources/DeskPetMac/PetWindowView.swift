@@ -66,6 +66,7 @@ struct PetWindowView: View {
                                     mood: displayedMood,
                                     isHovering: hover,
                                     pulse: model.affectionPulse,
+                                    comboCount: model.comboCount,
                                     isSleeping: model.isSleeping,
                                     isDancing: model.isDancing,
                                     personalityPose: model.activePersonalityMoment?.pose,
@@ -79,9 +80,11 @@ struct PetWindowView: View {
                                     mood: displayedMood,
                                     isHovering: hover,
                                     pulse: model.affectionPulse,
+                                    comboCount: model.comboCount,
                                     isSleeping: model.isSleeping,
                                     isDancing: model.isDancing,
                                     personalityPose: model.activePersonalityMoment?.pose,
+                                    pointerOffset: pointerOffset,
                                     reduceMotion: reduceMotion
                                 )
                             }
@@ -93,6 +96,11 @@ struct PetWindowView: View {
                         height: SceneMetrics.artworkSize.height
                     )
                     .accessibilityLabel("Pat \(model.petKind.displayName)")
+                    .accessibilityValue(
+                        model.comboCount >= 2
+                            ? "\(model.comboCount) pat combo"
+                            : ""
+                    )
 
                     WeatherForeground(
                         mood: displayedMood,
@@ -124,7 +132,11 @@ struct PetWindowView: View {
                 .padding(.bottom, 10)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottom)
 
-            HeartParticleOverlay(burst: model.heartBurst, combo: model.comboCount)
+            HeartParticleOverlay(
+                burst: model.heartBurst,
+                combo: model.comboCount,
+                reduceMotion: reduceMotion
+            )
                 .allowsHitTesting(false)
                 .offset(y: 92)
 
@@ -341,14 +353,18 @@ private struct VectorPetBody: View {
     let mood: PetWeatherMood
     let isHovering: Bool
     let pulse: Int
+    let comboCount: Int
     let isSleeping: Bool
     let isDancing: Bool
     let personalityPose: PersonalityPose?
+    let pointerOffset: CGSize
     let reduceMotion: Bool
 
     @State private var isShowingPat = false
     @State private var patTask: Task<Void, Never>?
     @State private var patGeneration = 0
+    @State private var patStartedAt: TimeInterval?
+    @State private var patCombo = 1
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
@@ -400,6 +416,7 @@ private struct VectorPetBody: View {
                 reduceMotion: reduceMotion
             )
             let danceTilt = reduceMotion ? 0 : (isDancing ? sin(t * 9.0) * 9 : 0)
+            let interactionPose = interactionPose(at: t)
             let personalityTilt = if reduceMotion {
                 0.0
             } else {
@@ -452,20 +469,37 @@ private struct VectorPetBody: View {
                 }
             }
             .frame(width: 156, height: 158)
-            .rotationEffect(.degrees(danceTilt + personalityTilt + weather.tilt))
-            .offset(weather.offset)
-            .scaleEffect(scale + (pulse.isMultiple(of: 2) ? 0 : 0.015))
+            .rotationEffect(
+                .degrees(
+                    danceTilt
+                        + personalityTilt
+                        + weather.tilt
+                        + interactionPose.tiltDegrees
+                )
+            )
+            .offset(
+                x: weather.offset.width + interactionPose.x,
+                y: weather.offset.height + interactionPose.y
+            )
+            .scaleEffect(scale * interactionPose.scale)
         }
         .frame(width: 220, height: 218)
         .onChange(of: pulse) {
             patTask?.cancel()
             patGeneration += 1
             let generation = patGeneration
+            patStartedAt = Date().timeIntervalSinceReferenceDate
+            patCombo = max(1, comboCount)
             isShowingPat = true
             patTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(450))
+                try? await Task.sleep(
+                    for: .seconds(
+                        PetAnimationDynamics.patDuration(comboCount: patCombo)
+                    )
+                )
                 guard !Task.isCancelled, generation == patGeneration else { return }
                 isShowingPat = false
+                patStartedAt = nil
                 patTask = nil
             }
         }
@@ -474,6 +508,8 @@ private struct VectorPetBody: View {
             patTask = nil
             patGeneration += 1
             isShowingPat = false
+            patStartedAt = nil
+            patCombo = 1
         }
     }
 
@@ -536,6 +572,26 @@ private struct VectorPetBody: View {
         let remainder = time.truncatingRemainder(dividingBy: period)
         let normalized = remainder >= 0 ? remainder : remainder + period
         return normalized / period
+    }
+
+    private func interactionPose(at time: TimeInterval) -> PetAnimationPose {
+        guard !reduceMotion else { return .neutral }
+        if isShowingPat {
+            return PetAnimationDynamics.patPose(
+                for: kind,
+                elapsed: max(0, time - (patStartedAt ?? time)),
+                comboCount: patCombo
+            )
+        }
+        if isHovering {
+            return PetAnimationDynamics.attentionPose(
+                for: kind,
+                pointerX: pointerOffset.width,
+                pointerY: pointerOffset.height,
+                time: time
+            )
+        }
+        return .neutral
     }
 }
 
@@ -1344,13 +1400,14 @@ private struct Heart: Identifiable {
 private struct HeartParticleOverlay: View {
     let burst: Int
     let combo: Int
+    let reduceMotion: Bool
     @State private var hearts: [Heart] = []
     @State private var nextID = 0
 
     var body: some View {
         ZStack {
             ForEach(hearts) { heart in
-                FloatingHeart(heart: heart)
+                FloatingHeart(heart: heart, reduceMotion: reduceMotion)
             }
         }
         .onChange(of: burst) { _, _ in spawn() }
@@ -1383,6 +1440,7 @@ private struct HeartParticleOverlay: View {
 
 private struct FloatingHeart: View {
     let heart: Heart
+    let reduceMotion: Bool
     @State private var rise = false
 
     var body: some View {
@@ -1390,12 +1448,19 @@ private struct FloatingHeart: View {
             .font(.system(size: heart.size))
             .foregroundStyle(heart.color)
             .shadow(color: heart.color.opacity(0.5), radius: 4)
-            .offset(x: rise ? heart.x + heart.drift : heart.x, y: rise ? -96 : -6)
+            .offset(
+                x: reduceMotion ? heart.x : rise ? heart.x + heart.drift : heart.x,
+                y: reduceMotion ? -24 : rise ? -96 : -6
+            )
             .opacity(rise ? 0 : 0.95)
-            .scaleEffect(rise ? 1.15 : 0.4)
-            .rotationEffect(.degrees(Double(heart.drift) * 0.6))
+            .scaleEffect(reduceMotion ? 0.8 : rise ? 1.15 : 0.4)
+            .rotationEffect(
+                .degrees(reduceMotion ? 0 : Double(heart.drift) * 0.6)
+            )
             .onAppear {
-                withAnimation(.easeOut(duration: 1.2)) { rise = true }
+                withAnimation(.easeOut(duration: reduceMotion ? 0.2 : 1.2)) {
+                    rise = true
+                }
             }
     }
 }
@@ -1404,7 +1469,7 @@ private struct ComboBadge: View {
     let count: Int
 
     var body: some View {
-        Text("×\(count) combo!")
+        Text(label)
             .font(.system(size: 11, weight: .heavy, design: .rounded))
             .foregroundStyle(.white)
             .padding(.horizontal, 9)
@@ -1419,5 +1484,14 @@ private struct ComboBadge: View {
             )
             .overlay(Capsule().stroke(.white.opacity(0.5), lineWidth: 1))
             .shadow(color: .pink.opacity(0.4), radius: 4, y: 1)
+            .accessibilityLabel("\(count) pat combo")
+    }
+
+    private var label: String {
+        switch count {
+        case 8...: "×\(count) amazing!"
+        case 5...: "×\(count) great!"
+        default: "×\(count) combo!"
+        }
     }
 }

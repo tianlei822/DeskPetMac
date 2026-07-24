@@ -20,6 +20,24 @@ struct PetArtworkBlend {
     }
 }
 
+enum PetArtworkAnimationPolicy {
+    static func usesIndependentTailLayer(
+        for kind: PetKind,
+        reduceMotion: Bool,
+        isSleeping: Bool,
+        isHovering: Bool,
+        isShowingPat: Bool,
+        hasPersonalityPose: Bool
+    ) -> Bool {
+        kind != .pauli
+            && !reduceMotion
+            && !isSleeping
+            && !isHovering
+            && !isShowingPat
+            && !hasPersonalityPose
+    }
+}
+
 @MainActor
 enum PetArtworkLoader {
     private static let cache: NSCache<NSString, NSImage> = {
@@ -120,6 +138,7 @@ struct RealisticPetBody: View {
     let mood: PetWeatherMood
     let isHovering: Bool
     let pulse: Int
+    let comboCount: Int
     let isSleeping: Bool
     let isDancing: Bool
     let personalityPose: PersonalityPose?
@@ -131,6 +150,7 @@ struct RealisticPetBody: View {
     @State private var patTask: Task<Void, Never>?
     @State private var patGeneration = 0
     @State private var patStartedAt: TimeInterval?
+    @State private var patCombo = 1
     @State private var danceStartedAt: TimeInterval?
     @State private var personalityStartedAt: TimeInterval?
     @State private var motionArtworkReadyKind: PetKind?
@@ -245,11 +265,17 @@ struct RealisticPetBody: View {
             patGeneration += 1
             let generation = patGeneration
             patStartedAt = Date().timeIntervalSinceReferenceDate
+            patCombo = max(1, comboCount)
             isShowingPat = true
             patTask = Task { @MainActor in
-                try? await Task.sleep(for: .milliseconds(560))
+                try? await Task.sleep(
+                    for: .seconds(
+                        PetAnimationDynamics.patDuration(comboCount: patCombo)
+                    )
+                )
                 guard !Task.isCancelled, generation == patGeneration else { return }
                 isShowingPat = false
+                patStartedAt = nil
                 patTask = nil
             }
         }
@@ -267,6 +293,7 @@ struct RealisticPetBody: View {
             patGeneration += 1
             isShowingPat = false
             patStartedAt = nil
+            patCombo = 1
             danceStartedAt = nil
             personalityStartedAt = nil
         }
@@ -350,10 +377,10 @@ struct RealisticPetBody: View {
             return CGFloat(dancePose(at: time).scale)
         }
         if personalityPose != nil { return 1 }
-        let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
         if isHovering {
-            return 1.018 + CGFloat(idle.scale - 1) * 0.4
+            return CGFloat(attentionPose(at: time).scale)
         }
+        let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
         return 1 + CGFloat(idle.scale - 1) * idleAmplitudeMultiplier
     }
 
@@ -389,8 +416,7 @@ struct RealisticPetBody: View {
             return personalityTilt(at: time)
         }
         if isHovering {
-            let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
-            return clampedPointerOffset.width * 1.5 + idle.tiltDegrees * 0.25
+            return attentionPose(at: time).tiltDegrees
         }
 
         return PetAnimationDynamics.idlePose(for: kind, time: time).tiltDegrees
@@ -415,10 +441,10 @@ struct RealisticPetBody: View {
             return personalityOffset(at: time)
         }
         if isHovering {
-            let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
+            let attention = attentionPose(at: time)
             return CGSize(
-                width: clampedPointerOffset.width * 3 + idle.x * 0.35,
-                height: clampedPointerOffset.height * 2 + idle.y * 0.35
+                width: attention.x,
+                height: attention.y
             )
         }
 
@@ -533,7 +559,14 @@ struct RealisticPetBody: View {
         time: TimeInterval,
         motion: PetMotionFrame
     ) -> some View {
-        if kind == .pauli || reduceMotion || isSleeping {
+        if !PetArtworkAnimationPolicy.usesIndependentTailLayer(
+            for: kind,
+            reduceMotion: reduceMotion,
+            isSleeping: isSleeping,
+            isHovering: isHovering,
+            isShowingPat: isShowingPat,
+            hasPersonalityPose: personalityPose != nil
+        ) {
             artworkImage(artwork)
         } else {
             let sway = PetAnimationDynamics.tailSwayDegrees(
@@ -680,10 +713,12 @@ struct RealisticPetBody: View {
         return normalized / period
     }
 
-    private var clampedPointerOffset: CGSize {
-        CGSize(
-            width: min(1, max(-1, pointerOffset.width)),
-            height: min(1, max(-1, pointerOffset.height))
+    private func attentionPose(at time: TimeInterval) -> PetAnimationPose {
+        PetAnimationDynamics.attentionPose(
+            for: kind,
+            pointerX: pointerOffset.width,
+            pointerY: pointerOffset.height,
+            time: time
         )
     }
 
@@ -717,7 +752,8 @@ struct RealisticPetBody: View {
     private func patPose(at time: TimeInterval) -> PetAnimationPose {
         PetAnimationDynamics.patPose(
             for: kind,
-            elapsed: elapsed(since: patStartedAt, at: time)
+            elapsed: elapsed(since: patStartedAt, at: time),
+            comboCount: patCombo
         )
     }
 

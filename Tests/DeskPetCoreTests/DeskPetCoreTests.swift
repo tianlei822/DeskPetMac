@@ -538,6 +538,88 @@ struct PetAnimationDynamicsTests {
         }
     }
 
+    @Test("pat combos build from a soft bounce into a celebration")
+    func patComboEscalatesReaction() {
+        for pet in PetKind.allCases {
+            let softDuration = PetAnimationDynamics.patDuration(comboCount: 1)
+            let bounceDuration = PetAnimationDynamics.patDuration(comboCount: 3)
+            let celebrationDuration = PetAnimationDynamics.patDuration(comboCount: 5)
+            let soft = PetAnimationDynamics.patPose(
+                for: pet,
+                elapsed: softDuration * 0.36,
+                comboCount: 1
+            )
+            let bounce = PetAnimationDynamics.patPose(
+                for: pet,
+                elapsed: bounceDuration * 0.36,
+                comboCount: 3
+            )
+            let celebration = PetAnimationDynamics.patPose(
+                for: pet,
+                elapsed: celebrationDuration * 0.36,
+                comboCount: 5
+            )
+
+            #expect(softDuration < bounceDuration)
+            #expect(bounceDuration < celebrationDuration)
+            #expect(bounce.y < soft.y)
+            #expect(celebration.y < bounce.y)
+            #expect(bounce.scale > soft.scale)
+            #expect(celebration.scale > bounce.scale)
+            #expect(
+                PetAnimationDynamics.patPose(
+                    for: pet,
+                    elapsed: celebrationDuration,
+                    comboCount: 5
+                ) == .neutral
+            )
+            expectFinitePose(soft)
+            expectFinitePose(bounce)
+            expectFinitePose(celebration)
+        }
+    }
+
+    @Test("hover attention follows the pointer without breaking subtle bounds")
+    func attentionFollowsPointer() {
+        for pet in PetKind.allCases {
+            let left = PetAnimationDynamics.attentionPose(
+                for: pet,
+                pointerX: -1,
+                pointerY: -0.8,
+                time: 2
+            )
+            let right = PetAnimationDynamics.attentionPose(
+                for: pet,
+                pointerX: 1,
+                pointerY: 0.8,
+                time: 2
+            )
+
+            #expect(left.x < 0)
+            #expect(right.x > 0)
+            #expect(left.y < right.y)
+            #expect(left.tiltDegrees < 0)
+            #expect(right.tiltDegrees > 0)
+
+            for pose in [left, right] {
+                #expect(abs(pose.x) <= 5)
+                #expect(abs(pose.y) <= 4)
+                #expect((1...1.03).contains(pose.scale))
+                #expect(abs(pose.tiltDegrees) <= 3)
+                expectFinitePose(pose)
+            }
+        }
+
+        #expect(
+            PetAnimationDynamics.attentionPose(
+                for: .cat,
+                pointerX: .nan,
+                pointerY: 0,
+                time: 0
+            ) == .neutral
+        )
+    }
+
     @Test("dance response is smooth and character specific")
     func danceResponseIsCharacterSpecific() {
         for pet in PetKind.allCases {
