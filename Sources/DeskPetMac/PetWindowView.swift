@@ -69,10 +69,13 @@ struct PetWindowView: View {
                                     comboCount: model.comboCount,
                                     isSleeping: model.isSleeping,
                                     isDancing: model.isDancing,
+                                    isNuzzling: model.isNuzzling,
                                     personalityPose: model.activePersonalityMoment?.pose,
                                     pointerOffset: pointerOffset,
                                     reduceMotion: reduceMotion,
-                                    motionPreview: motionPreview
+                                    motionPreview: motionPreview,
+                                    dragLeanAt: { time in model.dragLean(at: time) },
+                                    cursorGaze: { model.cursorGazeOffset }
                                 )
                             } else {
                                 VectorPetBody(
@@ -90,7 +93,12 @@ struct PetWindowView: View {
                             }
                         }
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(PetBodyButtonStyle())
+                    .simultaneousGesture(
+                        LongPressGesture(minimumDuration: 0.5, maximumDistance: 24)
+                            .onChanged { _ in model.beginNuzzle() }
+                            .onEnded { _ in model.endNuzzle() }
+                    )
                     .frame(
                         width: SceneMetrics.artworkSize.width,
                         height: SceneMetrics.artworkSize.height
@@ -156,6 +164,13 @@ struct PetWindowView: View {
         }
         .background(.clear)
         .contextMenu {
+            Button("Pat") { model.pat() }
+            Button("Dance") { model.dance() }
+            Divider()
+            Button("Refresh Weather") {
+                Task { await model.refreshWeather() }
+            }
+            Divider()
             Button("Close DeskPet") {
                 NSApp.terminate(nil)
             }
@@ -367,7 +382,7 @@ private struct VectorPetBody: View {
     @State private var patCombo = 1
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1 / 30)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
             let t = timeline.date.timeIntervalSinceReferenceDate
             let weather = weatherMotion(at: t)
             let danceBob = reduceMotion ? 0 : (isDancing ? abs(sin(t * 9.0)) * 8 : 0)
@@ -1183,6 +1198,17 @@ private struct PauliSidePod: Shape {
     }
 }
 
+private struct PetBodyButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.965 : 1)
+            .animation(
+                .spring(response: 0.18, dampingFraction: 0.7),
+                value: configuration.isPressed
+            )
+    }
+}
+
 private struct PetIconButtonStyle: ButtonStyle {
     let tint: Color
     let isActive: Bool
@@ -1472,6 +1498,7 @@ private struct ComboBadge: View {
         Text(label)
             .font(.system(size: 11, weight: .heavy, design: .rounded))
             .foregroundStyle(.white)
+            .contentTransition(.numericText())
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(

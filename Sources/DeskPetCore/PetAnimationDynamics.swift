@@ -24,6 +24,18 @@ public struct PetAnimationPose: Equatable, Sendable {
         scale: 1,
         tiltDegrees: 0
     )
+
+    /// Returns a copy with every component scaled toward neutral by `factor` (0...1).
+    public func scaled(by factor: Double) -> PetAnimationPose {
+        guard factor.isFinite else { return .neutral }
+        let clamped = min(1, max(0, factor))
+        return PetAnimationPose(
+            x: x * clamped,
+            y: y * clamped,
+            scale: 1 + (scale - 1) * clamped,
+            tiltDegrees: tiltDegrees * clamped
+        )
+    }
 }
 
 public enum PetAnimationDynamics {
@@ -180,6 +192,31 @@ public enum PetAnimationDynamics {
             y: -hop * tuning.verticalAmplitude * envelope,
             scale: 1 + hop * tuning.scaleAmplitude * envelope,
             tiltDegrees: (sway * tuning.tiltAmplitude + counterMotion) * envelope
+        )
+    }
+
+    /// A contented squeeze while the user presses and holds the pet.
+    /// Ramps in smoothly and keeps a slow breathing wobble for as long as held.
+    public static func nuzzlePose(
+        for pet: PetKind,
+        elapsed: Double
+    ) -> PetAnimationPose {
+        guard elapsed.isFinite, elapsed > 0 else { return .neutral }
+
+        let settle = 1 - exp(-elapsed * 5)
+        let breath = sin(elapsed * 3.1) * 0.5 + 0.5
+        let characterEnergy: Double = switch pet {
+        case .cat: 0.9
+        case .pauli: 0.75
+        case .dog: 1.1
+        }
+        let squeeze = settle * (0.9 + breath * 0.1) * characterEnergy
+
+        return PetAnimationPose(
+            x: sin(elapsed * 1.7) * 0.5 * settle,
+            y: -0.6 * squeeze,
+            scale: 1 + 0.02 * squeeze,
+            tiltDegrees: sin(elapsed * 2.3) * 1.2 * settle * characterEnergy
         )
     }
 

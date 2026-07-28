@@ -38,6 +38,75 @@ enum PetArtworkAnimationPolicy {
     }
 }
 
+struct PetArtworkCrossfade {
+    let currentOpacity: Double
+    let outgoingOpacity: Double
+
+    init(progress: Double) {
+        let clamped = progress.isFinite ? min(1, max(0, progress)) : 1
+        let eased = clamped * clamped * (3 - 2 * clamped)
+        currentOpacity = eased
+        outgoingOpacity = 1 - eased
+    }
+}
+
+/// Tracks the presented presentation-state artwork and blends through changes
+/// (blink, hover, pat, sleep, personality) instead of hard-cutting between images.
+@MainActor
+final class PetArtworkTransitionStore {
+    static let standardDuration = 0.16
+    static let blinkDuration = 0.07
+
+    private(set) var presentedName: String?
+    private var outgoingName: String?
+    private var startedAt = 0.0
+    private var duration = 0.0
+
+    func reset() {
+        presentedName = nil
+        outgoingName = nil
+    }
+
+    func layers(
+        for requested: String,
+        at time: Double,
+        animated: Bool
+    ) -> (
+        current: String,
+        currentOpacity: Double,
+        outgoing: String?,
+        outgoingOpacity: Double
+    ) {
+        guard animated, time.isFinite else {
+            presentedName = requested
+            outgoingName = nil
+            return (requested, 1, nil, 0)
+        }
+
+        if presentedName == nil {
+            presentedName = requested
+        } else if requested != presentedName {
+            outgoingName = presentedName
+            let blinkInvolved = requested.hasSuffix("/blink")
+                || presentedName?.hasSuffix("/blink") == true
+            duration = blinkInvolved ? Self.blinkDuration : Self.standardDuration
+            startedAt = time
+            presentedName = requested
+        }
+
+        guard let outgoing = outgoingName else {
+            return (requested, 1, nil, 0)
+        }
+        let progress = (time - startedAt) / duration
+        guard progress < 1 else {
+            outgoingName = nil
+            return (requested, 1, nil, 0)
+        }
+        let fade = PetArtworkCrossfade(progress: progress)
+        return (requested, fade.currentOpacity, outgoing, fade.outgoingOpacity)
+    }
+}
+
 @MainActor
 enum PetArtworkLoader {
     private static let cache: NSCache<NSString, NSImage> = {
@@ -141,10 +210,13 @@ struct RealisticPetBody: View {
     let comboCount: Int
     let isSleeping: Bool
     let isDancing: Bool
+    let isNuzzling: Bool
     let personalityPose: PersonalityPose?
     let pointerOffset: CGSize
     let reduceMotion: Bool
     let motionPreview: PetMotionEvent?
+    let dragLeanAt: (TimeInterval) -> PetDragLean
+    let cursorGaze: () -> CGSize?
 
     @State private var isShowingPat = false
     @State private var patTask: Task<Void, Never>?
@@ -153,11 +225,15 @@ struct RealisticPetBody: View {
     @State private var patCombo = 1
     @State private var danceStartedAt: TimeInterval?
     @State private var personalityStartedAt: TimeInterval?
+    @State private var nuzzleStartedAt: TimeInterval?
+    @State private var nuzzleReleasedAt: TimeInterval?
+    @State private var nuzzleElapsedAtRelease: TimeInterval = 0
     @State private var motionArtworkReadyKind: PetKind?
     @State private var motionScheduleClock = PetMotionScheduleClock()
+    @State private var artworkTransitions = PetArtworkTransitionStore()
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
             let time = timeline.date.timeIntervalSinceReferenceDate
             let strongWeatherReactionActive = PetMotionDirector
                 .isStrongWeatherReactionActive(weatherReaction, time: time)
@@ -176,6 +252,8 @@ struct RealisticPetBody: View {
             )
             let maskArtwork = PetArtworkLoader.image(named: requested)
                 ?? PetArtworkLoader.image(named: manifest.base)
+            let gaze = gazePose(at: time, motion: motion)
+            let lean = dragLean(at: time)
 
             Group {
                 if let maskArtwork {
@@ -212,8 +290,10 @@ struct RealisticPetBody: View {
                         .frame(width: 190, height: 198)
                         .shadow(color: .black.opacity(0.16), radius: 8, y: 5)
                         .scaleEffect(
-                            x: composedHorizontalScale(at: time, motion: motion),
-                            y: composedVerticalScale(at: time, motion: motion),
+                            x: composedHorizontalScale(at: time, motion: motion)
+                                * CGFloat(gaze.scale),
+                            y: composedVerticalScale(at: time, motion: motion)
+                                * CGFloat(gaze.scale),
                             anchor: .bottom
                         )
                         .rotationEffect(
@@ -221,9 +301,16 @@ struct RealisticPetBody: View {
                                 animatedTilt(at: time)
                                     + weatherTilt(at: time)
                                     + motion.tiltDegrees
+                                    + gaze.tiltDegrees
+                                    + lean.tiltDegrees
                             )
                         )
-                        .offset(composedOffset(at: time, motion: motion))
+                        .offset(
+                            x: composedOffset(at: time, motion: motion).width
+                                + gaze.x + lean.offsetX,
+                            y: composedOffset(at: time, motion: motion).height
+                                + gaze.y + lean.offsetY
+                        )
                     }
                 }
             }
@@ -245,6 +332,7 @@ struct RealisticPetBody: View {
             let requestedKind = kind
             motionArtworkReadyKind = nil
             motionScheduleClock.updateEligibility(false, at: 0)
+            artworkTransitions.reset()
             let isComplete = await PetArtworkLoader.preloadMotionArtwork(
                 for: requestedKind
             )
@@ -287,6 +375,18 @@ struct RealisticPetBody: View {
                 ? nil
                 : Date().timeIntervalSinceReferenceDate
         }
+        .onChange(of: isNuzzling) {
+            let now = Date().timeIntervalSinceReferenceDate
+            if isNuzzling {
+                nuzzleStartedAt = now
+                nuzzleReleasedAt = nil
+                nuzzleElapsedAtRelease = 0
+            } else {
+                nuzzleElapsedAtRelease = nuzzleStartedAt.map { max(0, now - $0) } ?? 0
+                nuzzleStartedAt = nil
+                nuzzleReleasedAt = now
+            }
+        }
         .onDisappear {
             patTask?.cancel()
             patTask = nil
@@ -296,6 +396,9 @@ struct RealisticPetBody: View {
             patCombo = 1
             danceStartedAt = nil
             personalityStartedAt = nil
+            nuzzleStartedAt = nil
+            nuzzleReleasedAt = nil
+            nuzzleElapsedAtRelease = 0
         }
     }
 
@@ -348,6 +451,7 @@ struct RealisticPetBody: View {
         if isSleeping { return manifest.resourceName(for: .sleep) }
         if isShowingPat { return manifest.resourceName(for: .pat) }
         if isDancing { return manifest.base }
+        if isNuzzleActive(at: time) { return manifest.blink }
         if let personalityPose {
             return manifest.resourceName(for: .personality(personalityPose))
         }
@@ -377,6 +481,9 @@ struct RealisticPetBody: View {
             return CGFloat(dancePose(at: time).scale)
         }
         if personalityPose != nil { return 1 }
+        if isNuzzleActive(at: time) {
+            return CGFloat(nuzzlePose(at: time).scale)
+        }
         if isHovering {
             return CGFloat(attentionPose(at: time).scale)
         }
@@ -415,6 +522,9 @@ struct RealisticPetBody: View {
         if personalityPose != nil {
             return personalityTilt(at: time)
         }
+        if isNuzzleActive(at: time) {
+            return nuzzlePose(at: time).tiltDegrees
+        }
         if isHovering {
             return attentionPose(at: time).tiltDegrees
         }
@@ -439,6 +549,10 @@ struct RealisticPetBody: View {
         }
         if personalityPose != nil {
             return personalityOffset(at: time)
+        }
+        if isNuzzleActive(at: time) {
+            let pose = nuzzlePose(at: time)
+            return CGSize(width: pose.x, height: pose.y)
         }
         if isHovering {
             let attention = attentionPose(at: time)
@@ -531,10 +645,32 @@ struct RealisticPetBody: View {
                 time: time,
                 motion: motion
             )
-            if let artwork = PetArtworkLoader.image(named: requested)
-                ?? PetArtworkLoader.image(named: manifest.base) {
-                animatedArtwork(artwork, time: time, motion: motion)
+            let layers = artworkTransitions.layers(
+                for: requested,
+                at: time,
+                animated: !reduceMotion
+            )
+            ZStack {
+                if let outgoing = layers.outgoing, layers.outgoingOpacity > 0 {
+                    transitionedArtwork(named: outgoing, opacity: layers.outgoingOpacity, time: time, motion: motion)
+                }
+                transitionedArtwork(named: layers.current, opacity: layers.currentOpacity, time: time, motion: motion)
             }
+        }
+    }
+
+    @ViewBuilder
+    private func transitionedArtwork(
+        named resourceName: String,
+        opacity: Double,
+        time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> some View {
+        if opacity > 0,
+           let artwork = PetArtworkLoader.image(named: resourceName)
+               ?? PetArtworkLoader.image(named: PetArtworkManifest(petKind: kind).base) {
+            animatedArtwork(artwork, time: time, motion: motion)
+                .opacity(opacity)
         }
     }
 
@@ -762,6 +898,53 @@ struct RealisticPetBody: View {
             for: kind,
             elapsed: elapsed(since: danceStartedAt, at: time)
         )
+    }
+
+    private func nuzzlePose(at time: TimeInterval) -> PetAnimationPose {
+        if let nuzzleStartedAt {
+            return PetAnimationDynamics.nuzzlePose(
+                for: kind,
+                elapsed: max(0, time - nuzzleStartedAt)
+            )
+        }
+        if let nuzzleReleasedAt {
+            let fade = exp(-max(0, time - nuzzleReleasedAt) * 6)
+            guard fade > 0.01 else { return .neutral }
+            return PetAnimationDynamics
+                .nuzzlePose(for: kind, elapsed: nuzzleElapsedAtRelease)
+                .scaled(by: fade)
+        }
+        return .neutral
+    }
+
+    private func isNuzzleActive(at time: TimeInterval) -> Bool {
+        guard !reduceMotion else { return false }
+        if nuzzleStartedAt != nil { return true }
+        guard let nuzzleReleasedAt else { return false }
+        return time - nuzzleReleasedAt < 0.6
+    }
+
+    private func gazePose(at time: TimeInterval, motion: PetMotionFrame) -> PetAnimationPose {
+        guard !reduceMotion,
+              !isSleeping,
+              !isDancing,
+              !isShowingPat,
+              !isHovering,
+              !isNuzzleActive(at: time),
+              personalityPose == nil,
+              motion.event == .idle,
+              let offset = cursorGaze() else { return .neutral }
+        return PetAnimationDynamics.attentionPose(
+            for: kind,
+            pointerX: offset.width,
+            pointerY: offset.height,
+            time: time
+        ).scaled(by: 0.55)
+    }
+
+    private func dragLean(at time: TimeInterval) -> PetDragLean {
+        guard !reduceMotion, !isSleeping else { return .neutral }
+        return dragLeanAt(time)
     }
 
     private func elapsed(
