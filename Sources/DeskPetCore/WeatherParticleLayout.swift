@@ -19,6 +19,31 @@ public struct WeatherParticleSeed: Equatable, Sendable {
     public let opacityUnit: Double
     public let blurUnit: Double
 
+    /// Per-particle fall-speed variance (0.82...1.18) so drops and flakes in
+    /// the same depth band don't fall in lockstep. Derived from the seed.
+    public var fallSpeedMultiplier: Double {
+        0.82 + sizeUnit * 0.36
+    }
+
+    /// Horizontal drift for snowflakes: each flake sways at its own frequency
+    /// and amplitude (both seed-derived), avoiding the synchronized wobble of
+    /// a shared oscillator. Returns an offset in normalized width units.
+    public func swayOffset(at time: Double) -> Double {
+        guard time.isFinite else { return 0 }
+        let frequency = 0.25 + opacityUnit * 0.30
+        let amplitude = 0.012 + blurUnit * 0.018
+        let offset = sin(time * .pi * 2 * frequency + phase * .pi * 2) * amplitude
+        return offset.isFinite ? offset : 0
+    }
+
+    /// Slow brightness twinkle factor (0.8...1.0) for snowflakes.
+    public func twinkle(at time: Double) -> Double {
+        guard time.isFinite else { return 0.9 }
+        let frequency = 0.35 + phase * 0.5
+        let value = 0.9 + sin(time * .pi * 2 * frequency + sizeUnit * .pi * 2) * 0.1
+        return value.isFinite ? value : 0.9
+    }
+
     public func state(
         at time: Double,
         speed: Double,

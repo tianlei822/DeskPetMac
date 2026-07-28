@@ -219,6 +219,10 @@ private struct WeatherAtmosphereLayer: View {
                         endRadius: 59
                     )
                 )
+
+                if moving {
+                    drawSunRays(in: &context, size: size, time: time)
+                }
             }
                 .scaleEffect(moving ? 1 + sin(time * 0.75) * 0.025 : 1)
         }
@@ -231,31 +235,45 @@ private struct WeatherAtmosphereLayer: View {
                 let firstDrift = moving
                     ? sin(normalizedPhase(time, period: 19) * .pi * 2) * 9
                     : 0
+                let firstBob = moving
+                    ? sin(normalizedPhase(time, period: 23) * .pi * 2) * 2.5
+                    : 0
+                let firstBreath = moving
+                    ? 0.85 + sin(normalizedPhase(time, period: 31) * .pi * 2) * 0.15
+                    : 1
                 var firstContext = context
                 drawCloudMass(
                     in: &firstContext,
                     size: size,
                     center: CGPoint(
                         x: size.width * 0.17 + firstDrift,
-                        y: size.height * 0.20
+                        y: size.height * 0.20 + firstBob
                     ),
                     scale: 0.94,
-                    opacity: 0.13
+                    opacity: 0.13 * firstBreath,
+                    highlightOpacity: 0.075 * firstBreath
                 )
 
                 let secondDrift = moving
                     ? sin(normalizedPhase(time, period: 29) * .pi * 2) * -12
                     : 0
+                let secondBob = moving
+                    ? sin(normalizedPhase(time, period: 27) * .pi * 2) * 2
+                    : 0
+                let secondBreath = moving
+                    ? 0.85 + sin(normalizedPhase(time, period: 37) * .pi * 2) * 0.15
+                    : 1
                 var secondContext = context
                 drawCloudMass(
                     in: &secondContext,
                     size: size,
                     center: CGPoint(
                         x: size.width * 0.82 + secondDrift,
-                        y: size.height * 0.31
+                        y: size.height * 0.31 + secondBob
                     ),
                     scale: 0.72,
-                    opacity: 0.10
+                    opacity: 0.10 * secondBreath,
+                    highlightOpacity: 0.06 * secondBreath
                 )
             }
         } else if layer == .midground {
@@ -272,7 +290,8 @@ private struct WeatherAtmosphereLayer: View {
                         y: size.height * 0.42
                     ),
                     scale: 0.58,
-                    opacity: 0.055
+                    opacity: 0.055,
+                    highlightOpacity: 0.035
                 )
             }
         }
@@ -285,13 +304,18 @@ private struct WeatherAtmosphereLayer: View {
                 ? sin(normalizedPhase(time, period: settings.period) * .pi * 2)
                     * settings.amplitude
                 : 0
+            let breath = moving
+                ? 0.8 + sin(
+                    normalizedPhase(time, period: settings.period * 1.6) * .pi * 2
+                ) * 0.2
+                : 1
             var bandContext = context
             drawFogBand(
                 in: &bandContext,
                 size: size,
                 y: settings.y,
                 drift: drift,
-                opacity: settings.opacity,
+                opacity: settings.opacity * breath,
                 blur: settings.blur
             )
         }
@@ -452,7 +476,10 @@ private struct WeatherAtmosphereLayer: View {
            mood == .stormy,
            profile.supportsLightning {
             Canvas { context, size in
-                let opacity = lightningOpacity(time: time, moving: moving)
+                let period = profile.lightningPeriod ?? 24
+                let opacity = moving
+                    ? StormLightningSchedule.flashIntensity(at: time, period: period)
+                    : 0
                 guard opacity > 0 else { return }
 
                 context.fill(
@@ -473,10 +500,17 @@ private struct WeatherAtmosphereLayer: View {
                         endPoint: CGPoint(x: size.width * 0.18, y: size.height)
                     )
                 )
+                let variant = StormLightningSchedule.boltVariant(
+                    at: time,
+                    period: period,
+                    variantCount: lightningBoltSilhouettes.count
+                )
                 drawLightningBranch(
                     in: &context,
                     size: size,
-                    opacity: opacity
+                    opacity: opacity,
+                    variant: variant.index,
+                    mirrored: variant.mirrored
                 )
             }
             .blendMode(.screen)
@@ -487,6 +521,9 @@ private struct WeatherAtmosphereLayer: View {
     private func cozyAtmosphere(time: TimeInterval, moving: Bool) -> some View {
         if layer == .background {
             Canvas { context, size in
+                let flicker = moving
+                    ? 0.85 + (sin(time * 1.3) + sin(time * 2.7 + 1.2)) * 0.075
+                    : 1
                 let center = CGPoint(x: size.width / 2, y: size.height * 0.57)
                 let rect = CGRect(
                     x: center.x - 58,
@@ -499,9 +536,9 @@ private struct WeatherAtmosphereLayer: View {
                     with: .radialGradient(
                         Gradient(
                             colors: [
-                                Color.orange.opacity(0.13),
+                                Color.orange.opacity(0.13 * flicker),
                                 Color(red: 1, green: 0.55, blue: 0.25)
-                                    .opacity(0.045),
+                                    .opacity(0.045 * flicker),
                                 .clear,
                             ]
                         ),
@@ -515,12 +552,44 @@ private struct WeatherAtmosphereLayer: View {
         }
     }
 
+    private func drawSunRays(
+        in context: inout GraphicsContext,
+        size: CGSize,
+        time: TimeInterval
+    ) {
+        let origin = CGPoint(x: 20, y: 18)
+        let length = size.height * 1.35
+        for index in 0..<3 {
+            let wobble = sin(
+                normalizedPhase(time, period: 26 + Double(index) * 5) * .pi * 2
+            ) * 0.055
+            let angle = 0.42 + Double(index) * 0.30 + wobble
+            let spread = 0.045
+            var ray = Path()
+            ray.move(to: origin)
+            ray.addLine(to: CGPoint(
+                x: origin.x + cos(angle - spread) * length,
+                y: origin.y + sin(angle - spread) * length
+            ))
+            ray.addLine(to: CGPoint(
+                x: origin.x + cos(angle + spread) * length,
+                y: origin.y + sin(angle + spread) * length
+            ))
+            ray.closeSubpath()
+            context.fill(
+                ray,
+                with: .color(Color(red: 1, green: 0.94, blue: 0.62).opacity(0.05))
+            )
+        }
+    }
+
     private func drawCloudMass(
         in context: inout GraphicsContext,
         size _: CGSize,
         center: CGPoint,
         scale: CGFloat,
-        opacity: Double
+        opacity: Double,
+        highlightOpacity: Double = 0
     ) {
         let lobes: [(CGFloat, CGFloat, CGFloat)] = [
             (-32, 4, 24),
@@ -543,6 +612,24 @@ private struct WeatherAtmosphereLayer: View {
                 with: .color(
                     Color(red: 0.46, green: 0.53, blue: 0.62)
                         .opacity(opacity)
+                )
+            )
+        }
+
+        guard highlightOpacity > 0 else { return }
+        for lobe in lobes {
+            let diameter = lobe.2 * scale * 0.62
+            let rect = CGRect(
+                x: center.x + lobe.0 * scale - diameter / 2,
+                y: center.y + lobe.1 * scale - lobe.2 * scale * 0.26 - diameter / 2,
+                width: diameter,
+                height: diameter
+            )
+            context.fill(
+                Path(ellipseIn: rect),
+                with: .color(
+                    Color(red: 0.80, green: 0.84, blue: 0.89)
+                        .opacity(highlightOpacity)
                 )
             )
         }
@@ -615,37 +702,69 @@ private struct WeatherAtmosphereLayer: View {
         }
     }
 
+    /// Bolt silhouettes in unit-fraction coordinates of the weather canvas.
+    private var lightningBoltSilhouettes: [[CGPoint]] {
+        [
+            [
+                CGPoint(x: 0.91, y: 0.06),
+                CGPoint(x: 0.84, y: 0.22),
+                CGPoint(x: 0.88, y: 0.32),
+                CGPoint(x: 0.79, y: 0.48),
+                CGPoint(x: 0.82, y: 0.59),
+                CGPoint(x: 0.74, y: 0.73),
+            ],
+            [
+                CGPoint(x: 0.16, y: 0.04),
+                CGPoint(x: 0.23, y: 0.17),
+                CGPoint(x: 0.17, y: 0.30),
+                CGPoint(x: 0.25, y: 0.43),
+                CGPoint(x: 0.19, y: 0.57),
+                CGPoint(x: 0.27, y: 0.70),
+            ],
+            [
+                CGPoint(x: 0.55, y: 0.05),
+                CGPoint(x: 0.47, y: 0.19),
+                CGPoint(x: 0.57, y: 0.28),
+                CGPoint(x: 0.46, y: 0.42),
+                CGPoint(x: 0.54, y: 0.55),
+                CGPoint(x: 0.43, y: 0.69),
+            ],
+        ]
+    }
+
     private func drawLightningBranch(
         in context: inout GraphicsContext,
         size: CGSize,
-        opacity: Double
+        opacity: Double,
+        variant: Int,
+        mirrored: Bool
     ) {
-        guard opacity > 0 else { return }
+        guard opacity > 0,
+              lightningBoltSilhouettes.indices.contains(variant) else { return }
         var path = Path()
-        path.move(to: CGPoint(x: size.width * 0.91, y: size.height * 0.06))
-        path.addLine(to: CGPoint(x: size.width * 0.84, y: size.height * 0.22))
-        path.addLine(to: CGPoint(x: size.width * 0.88, y: size.height * 0.32))
-        path.addLine(to: CGPoint(x: size.width * 0.79, y: size.height * 0.48))
-        path.addLine(to: CGPoint(x: size.width * 0.82, y: size.height * 0.59))
-        path.addLine(to: CGPoint(x: size.width * 0.74, y: size.height * 0.73))
+        for (index, point) in lightningBoltSilhouettes[variant].enumerated() {
+            let resolved = CGPoint(
+                x: (mirrored ? 1 - point.x : point.x) * size.width,
+                y: point.y * size.height
+            )
+            if index == 0 {
+                path.move(to: resolved)
+            } else {
+                path.addLine(to: resolved)
+            }
+        }
         context.stroke(
             path,
-            with: .color(Color.white.opacity(opacity * 0.72)),
-            lineWidth: 1.2
+            with: .color(
+                Color(red: 0.74, green: 0.84, blue: 1).opacity(opacity * 0.9)
+            ),
+            style: StrokeStyle(lineWidth: 3, lineCap: .round, lineJoin: .round)
         )
-    }
-
-    private func lightningOpacity(time: TimeInterval, moving: Bool) -> Double {
-        guard moving, let period = profile.lightningPeriod else { return 0 }
-        let phase = euclideanModulo(time, modulus: period)
-        switch phase {
-        case 0..<0.07:
-            return 0.19 * (1 - phase / 0.07)
-        case 0.12..<0.19:
-            return 0.10 * (1 - (phase - 0.12) / 0.07)
-        default:
-            return 0
-        }
+        context.stroke(
+            path,
+            with: .color(Color.white.opacity(opacity * 0.85)),
+            style: StrokeStyle(lineWidth: 1.2, lineCap: .round, lineJoin: .round)
+        )
     }
 
     private func normalizedPhase(_ value: TimeInterval, period: Double) -> Double {

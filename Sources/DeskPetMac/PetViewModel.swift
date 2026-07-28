@@ -1,3 +1,4 @@
+import AppKit
 import DeskPetCore
 import Foundation
 
@@ -16,6 +17,7 @@ final class PetViewModel: ObservableObject {
     @Published private(set) var comboCount = 0
     @Published private(set) var heartBurst = 0
     @Published private(set) var activePersonalityMoment: PersonalityMoment?
+    @Published private(set) var isNuzzling = false
     @Published var isPetPickerVisible = false
     @Published var isSettingsVisible = false
     @Published var reminderMinutes = 60.0 {
@@ -37,9 +39,13 @@ final class PetViewModel: ObservableObject {
     private var comboResetTask: Task<Void, Never>?
     private var personalityScheduleTask: Task<Void, Never>?
     private var personalityDismissTask: Task<Void, Never>?
+    private var nuzzleTask: Task<Void, Never>?
     private var recentPersonalityMomentIDs: [String] = []
     private var statusRevealToken = 0
     private var lastPatAt: Date?
+    private var dragLeanTracker = DragLeanTracker()
+    private let cursorTracker = CursorTracker()
+    private var windowMoveObserver: NSObjectProtocol?
 
     private let comboWindow: TimeInterval = 1.8
     private let comboResetDelay: TimeInterval = 2.2
@@ -81,6 +87,7 @@ final class PetViewModel: ObservableObject {
         startSleepMonitor()
         startWeatherLoop()
         startPersonalitySchedule()
+        startInteractionTracking()
         await refreshWeather()
     }
 
@@ -149,6 +156,42 @@ final class PetViewModel: ObservableObject {
             try? await Task.sleep(for: .seconds(1.8))
             self?.isDancing = false
         }
+    }
+
+    func beginNuzzle() {
+        wake()
+        guard !isNuzzling, !isDancing else { return }
+        clearPersonalityMoment()
+        isNuzzling = true
+        isReminderVisible = false
+        bond.registerPlay(points: 1)
+        persistBond()
+        affectionPulse += 1
+        heartBurst += 1
+
+        nuzzleTask?.cancel()
+        nuzzleTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(0.7))
+                guard !Task.isCancelled else { return }
+                self?.heartBurst += 1
+            }
+        }
+    }
+
+    func endNuzzle() {
+        guard isNuzzling else { return }
+        isNuzzling = false
+        nuzzleTask?.cancel()
+        nuzzleTask = nil
+    }
+
+    func dragLean(at time: TimeInterval) -> PetDragLean {
+        dragLeanTracker.lean(at: time)
+    }
+
+    var cursorGazeOffset: CGSize? {
+        cursorTracker.normalizedOffset
     }
 
     func takeBreak() {
@@ -251,6 +294,25 @@ final class PetViewModel: ObservableObject {
                 self.presentPersonalityMoment()
             }
         }
+    }
+
+    private func startInteractionTracking() {
+        guard windowMoveObserver == nil else { return }
+        windowMoveObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didMoveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            guard let window = notification.object as? NSWindow else { return }
+            Task { @MainActor [weak self] in
+                self?.dragLeanTracker.recordWindowOrigin(
+                    x: window.frame.origin.x,
+                    y: window.frame.origin.y,
+                    at: Date().timeIntervalSinceReferenceDate
+                )
+            }
+        }
+        cursorTracker.start()
     }
 
     private var isPersonalityPresentationBlocked: Bool {

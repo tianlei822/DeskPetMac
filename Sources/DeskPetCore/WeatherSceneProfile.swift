@@ -45,7 +45,7 @@ public struct WeatherSceneProfile: Equatable, Sendable {
     public init(mood: PetWeatherMood) {
         self.mood = mood
         self.transitionDuration = 0.8
-        self.maximumFramesPerSecond = 30
+        self.maximumFramesPerSecond = 60
 
         switch mood {
         case .sunny:

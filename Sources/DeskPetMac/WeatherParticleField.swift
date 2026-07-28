@@ -20,11 +20,11 @@ struct WeatherParticleField: View {
                 var particleContext = context
                 let state = particle.state(
                     at: time,
-                    speed: depthProfile.speed,
+                    speed: depthProfile.speed * particle.fallSpeedMultiplier,
                     wind: animatedWind(for: particle),
                     moving: moving
                 )
-                let point = CGPoint(
+                var point = CGPoint(
                     x: CGFloat(state.x) * size.width,
                     y: CGFloat(state.y) * size.height
                 )
@@ -33,6 +33,7 @@ struct WeatherParticleField: View {
                 case .rainy, .stormy:
                     drawRain(particle, at: point, in: &particleContext)
                 case .snowy:
+                    point.x += particle.swayOffset(at: moving ? time : 0) * size.width
                     drawSnow(particle, at: point, in: &particleContext)
                 case .sunny, .cozy:
                     drawMote(particle, at: point, in: &particleContext)
@@ -76,18 +77,23 @@ struct WeatherParticleField: View {
         let blur = CGFloat(interpolate(depthProfile.blur, unit: particle.blurUnit))
         context.addFilter(.blur(radius: blur))
 
+        let slant = CGFloat(profile.wind) * (0.75 + particle.phase * 0.5)
+        let tip = CGPoint(x: point.x + slant * length, y: point.y + length)
         var path = Path()
         path.move(to: point)
-        path.addLine(
-            to: CGPoint(
-                x: point.x + CGFloat(profile.wind) * length * 0.8,
-                y: point.y + length
-            )
-        )
+        path.addLine(to: tip)
+
+        let dropColor = Color(red: 0.55, green: 0.76, blue: 0.95)
         context.stroke(
             path,
-            with: .color(
-                Color(red: 0.55, green: 0.76, blue: 0.95).opacity(opacity)
+            with: .linearGradient(
+                Gradient(stops: [
+                    .init(color: dropColor.opacity(0), location: 0),
+                    .init(color: dropColor.opacity(opacity * 0.8), location: 0.55),
+                    .init(color: dropColor.opacity(opacity), location: 1),
+                ]),
+                startPoint: point,
+                endPoint: tip
             ),
             style: StrokeStyle(
                 lineWidth: depth == .foreground ? 1.5 : 1,
@@ -111,9 +117,15 @@ struct WeatherParticleField: View {
         in context: inout GraphicsContext
     ) {
         let diameter = CGFloat(interpolate(depthProfile.size, unit: particle.sizeUnit))
-        let opacity = interpolate(depthProfile.opacity, unit: particle.opacityUnit)
+        let twinkle = moving ? particle.twinkle(at: time) : 0.9
+        let opacity = interpolate(depthProfile.opacity, unit: particle.opacityUnit) * twinkle
         let blur = CGFloat(interpolate(depthProfile.blur, unit: particle.blurUnit))
         context.addFilter(.blur(radius: blur))
+
+        if depth == .foreground, diameter >= 5, particle.sizeUnit > 0.6 {
+            drawSnowSparkle(at: point, diameter: diameter, opacity: opacity, in: &context)
+            return
+        }
 
         let rect = CGRect(
             x: point.x - diameter / 2,
@@ -140,6 +152,34 @@ struct WeatherParticleField: View {
                 with: .color(Color.white.opacity(opacity * 0.55))
             )
         }
+    }
+
+    private func drawSnowSparkle(
+        at point: CGPoint,
+        diameter: CGFloat,
+        opacity: Double,
+        in context: inout GraphicsContext
+    ) {
+        let half = diameter * 0.62
+        var path = Path()
+        path.move(to: CGPoint(x: point.x, y: point.y - half))
+        path.addLine(to: CGPoint(x: point.x, y: point.y + half))
+        path.move(to: CGPoint(x: point.x - half, y: point.y))
+        path.addLine(to: CGPoint(x: point.x + half, y: point.y))
+        context.stroke(
+            path,
+            with: .color(Color(red: 0.88, green: 0.95, blue: 1).opacity(opacity)),
+            style: StrokeStyle(lineWidth: 1, lineCap: .round)
+        )
+        context.fill(
+            Path(ellipseIn: CGRect(
+                x: point.x - 1,
+                y: point.y - 1,
+                width: 2,
+                height: 2
+            )),
+            with: .color(Color.white.opacity(opacity))
+        )
     }
 
     private func drawMote(
@@ -214,13 +254,14 @@ struct WeatherParticleField: View {
             width: size.width * 0.68,
             height: 28
         )
+        let shimmer = moving ? 0.85 + sin(time * 2.1) * 0.15 : 1
         context.addFilter(.blur(radius: 7))
         context.fill(
             Path(ellipseIn: rect),
             with: .linearGradient(
                 Gradient(colors: [
-                    Color(red: 0.36, green: 0.68, blue: 0.88).opacity(0.03),
-                    Color(red: 0.54, green: 0.78, blue: 0.94).opacity(0.12),
+                    Color(red: 0.36, green: 0.68, blue: 0.88).opacity(0.03 * shimmer),
+                    Color(red: 0.54, green: 0.78, blue: 0.94).opacity(0.12 * shimmer),
                     .clear,
                 ]),
                 startPoint: CGPoint(x: rect.minX, y: rect.midY),
@@ -234,11 +275,14 @@ struct WeatherParticleField: View {
         size: CGSize
     ) {
         for index in 0..<5 {
-            let phase = splashPhase(offset: Double(index) * 0.19)
-            let centerX = size.width * (0.20 + CGFloat(index) * 0.15)
+            let period = 1.7 + Double((index * 37 + 11) % 7) * 0.23
+            let jitterX = CGFloat((index * 53 + 7) % 11) - 5
+            let phase = splashPhase(offset: Double(index) * 0.19, period: period)
+            let centerX = size.width * (0.20 + CGFloat(index) * 0.15) + jitterX
+            let centerY = size.height * (0.84 + CGFloat(index % 2) * 0.025)
             let rect = CGRect(
                 x: centerX - 7 - phase * 6,
-                y: size.height * (0.84 + CGFloat(index % 2) * 0.025),
+                y: centerY,
                 width: 14 + phase * 12,
                 height: 4 + phase * 3
             )
@@ -249,13 +293,35 @@ struct WeatherParticleField: View {
                 ),
                 lineWidth: 1
             )
+
+            if moving, phase < 0.22 {
+                let crown = 1 - phase / 0.22
+                var crownPath = Path()
+                for side in [-1.0, 1.0] {
+                    let base = CGPoint(
+                        x: centerX + side * 4,
+                        y: centerY + 3
+                    )
+                    crownPath.move(to: base)
+                    crownPath.addLine(
+                        to: CGPoint(x: base.x + side * 1.5, y: base.y - 4.5)
+                    )
+                }
+                context.stroke(
+                    crownPath,
+                    with: .color(
+                        Color(red: 0.62, green: 0.80, blue: 0.98)
+                            .opacity(0.30 * crown)
+                    ),
+                    style: StrokeStyle(lineWidth: 0.8, lineCap: .round)
+                )
+            }
         }
     }
 
-    private func splashPhase(offset: Double) -> CGFloat {
+    private func splashPhase(offset: Double, period: Double) -> CGFloat {
         guard moving else { return CGFloat(0.35 + offset * 0.3) }
-        let duration = 2.4
-        let remainder = (time / duration + offset).truncatingRemainder(dividingBy: 1)
+        let remainder = (time / period + offset).truncatingRemainder(dividingBy: 1)
         return CGFloat(remainder >= 0 ? remainder : remainder + 1)
     }
 

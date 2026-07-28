@@ -35,7 +35,7 @@ struct WeatherSceneProfileTests {
             #expect(profile.foreground.count >= 0)
             #expect(profile.totalParticleCount <= 40)
             #expect(profile.transitionDuration == 0.8)
-            #expect(profile.maximumFramesPerSecond == 30)
+            #expect(profile.maximumFramesPerSecond == 60)
         }
     }
 
@@ -1917,5 +1917,268 @@ struct PersonalityMomentTests {
         #expect(PersonalityMomentSchedule.delay(for: 600) == 20 * 60)
         #expect(PersonalityMomentSchedule.delay(for: Int.min) >= 10 * 60)
         #expect(PersonalityMomentSchedule.delay(for: Int.max) <= 20 * 60)
+    }
+}
+
+@Suite("Storm lightning schedule")
+struct StormLightningScheduleTests {
+    @Test("flash intensity stays bounded and deterministic")
+    func intensityIsBoundedAndDeterministic() {
+        for time in stride(from: -50.0, through: 500.0, by: 0.013) {
+            let first = StormLightningSchedule.flashIntensity(at: time, period: 24)
+            let second = StormLightningSchedule.flashIntensity(at: time, period: 24)
+            #expect(first == second)
+            #expect((0...StormLightningSchedule.peakIntensity).contains(first))
+        }
+    }
+
+    @Test("flashes fire at irregular offsets across cycles")
+    func flashesAreIrregular() {
+        var onsets = Set<Int>()
+        for cycle in 0..<6 {
+            let start = Double(cycle) * 24
+            for step in 0..<2400 {
+                let time = start + Double(step) * 0.01
+                if StormLightningSchedule.flashIntensity(at: time, period: 24) > 0 {
+                    onsets.insert(step)
+                    break
+                }
+            }
+        }
+        #expect(onsets.count > 1)
+    }
+
+    @Test("every cycle has both a flash and quiet gaps")
+    func cyclesHaveFlashAndQuiet() {
+        for cycle in 0..<4 {
+            let start = Double(cycle) * 24
+            var sawFlash = false
+            var sawQuiet = false
+            for step in 0..<2400 {
+                let value = StormLightningSchedule.flashIntensity(
+                    at: start + Double(step) * 0.01,
+                    period: 24
+                )
+                if value > 0 {
+                    sawFlash = true
+                } else {
+                    sawQuiet = true
+                }
+            }
+            #expect(sawFlash)
+            #expect(sawQuiet)
+        }
+    }
+
+    @Test("bolt variants stay in range deterministic and varied")
+    func boltVariants() {
+        for time in stride(from: 0.0, through: 300.0, by: 0.7) {
+            let first = StormLightningSchedule.boltVariant(
+                at: time,
+                period: 24,
+                variantCount: 3
+            )
+            let second = StormLightningSchedule.boltVariant(
+                at: time,
+                period: 24,
+                variantCount: 3
+            )
+            #expect(first == second)
+            #expect((0..<3).contains(first.index))
+        }
+        var seen = Set<Int>()
+        for cycle in 0..<9 {
+            seen.insert(
+                StormLightningSchedule.boltVariant(
+                    at: Double(cycle) * 24 + 0.5,
+                    period: 24,
+                    variantCount: 3
+                ).index
+            )
+        }
+        #expect(seen.count > 1)
+    }
+
+    @Test("non finite inputs are safe")
+    func nonFiniteIsSafe() {
+        #expect(StormLightningSchedule.flashIntensity(at: .nan, period: 24) == 0)
+        #expect(StormLightningSchedule.flashIntensity(at: 1, period: .infinity) == 0)
+        #expect(StormLightningSchedule.flashIntensity(at: 1, period: 0) == 0)
+        #expect(StormLightningSchedule.flashIntensity(at: 1, period: -4) == 0)
+        let variant = StormLightningSchedule.boltVariant(
+            at: .nan,
+            period: 24,
+            variantCount: 3
+        )
+        #expect(variant.index == 0)
+        #expect(!variant.mirrored)
+    }
+}
+
+@Suite("Drag lean tracker")
+struct DragLeanTrackerTests {
+    @Test("no movement stays neutral")
+    func noMovementIsNeutral() {
+        let tracker = DragLeanTracker()
+        #expect(tracker.lean(at: 10) == .neutral)
+    }
+
+    @Test("movement produces a bounded lean that decays to neutral")
+    func leanDecays() {
+        var tracker = DragLeanTracker()
+        for index in 0..<10 {
+            tracker.recordWindowOrigin(
+                x: Double(index) * 40,
+                y: 0,
+                at: Double(index) * 0.016
+            )
+        }
+        let duringDrag = tracker.lean(at: 10 * 0.016)
+        #expect(duringDrag != .neutral)
+        #expect(abs(duringDrag.tiltDegrees) <= 6.5)
+        #expect(abs(duringDrag.offsetX) <= 4)
+        #expect(abs(duringDrag.offsetY) <= 3)
+
+        let settled = tracker.lean(at: 10 * 0.016 + 5)
+        #expect(settled == .neutral)
+    }
+
+    @Test("lean trails the drag direction")
+    func leanDirection() {
+        var right = DragLeanTracker()
+        for index in 0..<8 {
+            right.recordWindowOrigin(
+                x: Double(index) * 60,
+                y: 0,
+                at: Double(index) * 0.016
+            )
+        }
+        #expect(right.lean(at: 8 * 0.016).tiltDegrees < 0)
+
+        var left = DragLeanTracker()
+        for index in 0..<8 {
+            left.recordWindowOrigin(
+                x: -Double(index) * 60,
+                y: 0,
+                at: Double(index) * 0.016
+            )
+        }
+        #expect(left.lean(at: 8 * 0.016).tiltDegrees > 0)
+    }
+
+    @Test("non finite samples are ignored")
+    func nonFiniteSafe() {
+        var tracker = DragLeanTracker()
+        tracker.recordWindowOrigin(x: .nan, y: 0, at: 0)
+        tracker.recordWindowOrigin(x: 0, y: 0, at: .nan)
+        #expect(tracker.lean(at: 1) == .neutral)
+
+        tracker.recordWindowOrigin(x: 0, y: 0, at: 0)
+        tracker.recordWindowOrigin(x: 100, y: 0, at: 0.5)
+        let lean = tracker.lean(at: 0.5)
+        #expect(lean.tiltDegrees.isFinite)
+        #expect(lean.offsetX.isFinite)
+        #expect(lean.offsetY.isFinite)
+        #expect(tracker.lean(at: .nan) == .neutral)
+    }
+}
+
+@Suite("Nuzzle pose")
+struct NuzzlePoseTests {
+    @Test("nuzzle starts at neutral and stays finite and bounded")
+    func nuzzleBounds() {
+        #expect(PetAnimationDynamics.nuzzlePose(for: .cat, elapsed: 0) == .neutral)
+        #expect(PetAnimationDynamics.nuzzlePose(for: .dog, elapsed: -1) == .neutral)
+        #expect(
+            PetAnimationDynamics.nuzzlePose(for: .pauli, elapsed: .nan) == .neutral
+        )
+        for pet in PetKind.allCases {
+            for elapsed in stride(from: 0.01, through: 30.0, by: 0.37) {
+                let pose = PetAnimationDynamics.nuzzlePose(
+                    for: pet,
+                    elapsed: elapsed
+                )
+                #expect(pose.x.isFinite)
+                #expect(pose.y.isFinite)
+                #expect(pose.scale.isFinite)
+                #expect(pose.tiltDegrees.isFinite)
+                #expect(abs(pose.x) <= 1)
+                #expect(abs(pose.tiltDegrees) <= 2)
+                #expect(abs(pose.scale - 1) <= 0.03)
+            }
+        }
+    }
+
+    @Test("nuzzle ramps in smoothly instead of snapping")
+    func nuzzleRampsIn() {
+        let early = PetAnimationDynamics.nuzzlePose(for: .cat, elapsed: 0.02)
+        let settled = PetAnimationDynamics.nuzzlePose(for: .cat, elapsed: 2)
+        #expect(abs(early.scale - 1) < abs(settled.scale - 1))
+    }
+
+    @Test("pose scaling interpolates toward neutral")
+    func poseScaling() {
+        let pose = PetAnimationPose(x: 4, y: -2, scale: 1.04, tiltDegrees: 3)
+        #expect(pose.scaled(by: 1) == pose)
+        #expect(pose.scaled(by: 0) == .neutral)
+        #expect(pose.scaled(by: 2) == pose)
+        #expect(pose.scaled(by: -1) == .neutral)
+        #expect(pose.scaled(by: .nan) == .neutral)
+        let half = pose.scaled(by: 0.5)
+        #expect(abs(half.x - 2) < 0.000_001)
+        #expect(abs(half.y + 1) < 0.000_001)
+        #expect(abs(half.scale - 1.02) < 0.000_001)
+        #expect(abs(half.tiltDegrees - 1.5) < 0.000_001)
+    }
+}
+
+@Suite("Weather particle variation")
+struct WeatherParticleVariationTests {
+    @Test("fall speed multipliers vary within bounds")
+    func fallSpeedVariance() {
+        let seeds = WeatherParticleLayout.particles(
+            count: 40,
+            seed: 91,
+            depth: .midground
+        )
+        let multipliers = seeds.map(\.fallSpeedMultiplier)
+        for multiplier in multipliers {
+            #expect((0.82...1.18).contains(multiplier))
+        }
+        #expect(Set(multipliers).count > 1)
+    }
+
+    @Test("snow sway is bounded deterministic and varied")
+    func snowSway() {
+        let seeds = WeatherParticleLayout.particles(
+            count: 30,
+            seed: 53,
+            depth: .foreground
+        )
+        for time in [-100.0, 0, 3.3, 999] {
+            let offsets = seeds.map { $0.swayOffset(at: time) }
+            for offset in offsets {
+                #expect(abs(offset) <= 0.030_000_1)
+            }
+            #expect(offsets == seeds.map { $0.swayOffset(at: time) })
+        }
+        let rounded = Set(seeds.map { ($0.swayOffset(at: 7) * 10_000).rounded() })
+        #expect(rounded.count > 1)
+        #expect(seeds[0].swayOffset(at: .nan) == 0)
+    }
+
+    @Test("twinkle stays in range")
+    func twinkleRange() {
+        let seeds = WeatherParticleLayout.particles(
+            count: 20,
+            seed: 77,
+            depth: .background
+        )
+        for time in stride(from: -5.0, through: 60.0, by: 0.31) {
+            for seed in seeds {
+                #expect((0.8...1.0).contains(seed.twinkle(at: time)))
+            }
+        }
+        #expect(seeds[0].twinkle(at: .infinity) == 0.9)
     }
 }

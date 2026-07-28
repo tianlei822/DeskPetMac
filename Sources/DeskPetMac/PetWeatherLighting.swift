@@ -69,6 +69,22 @@ struct PetWeatherLighting: View {
                                 .opacity(0.07)
                         )
                         .blendMode(.multiply)
+
+                    let flash = reduceMotion
+                        ? 0
+                        : StormLightningSchedule.flashIntensity(
+                            at: time,
+                            period: WeatherSceneProfile(mood: mood)
+                                .lightningPeriod ?? 24
+                        )
+                    if flash > 0 {
+                        Rectangle()
+                            .fill(
+                                Color(red: 0.82, green: 0.88, blue: 1)
+                                    .opacity(flash * 0.28)
+                            )
+                            .blendMode(.screen)
+                    }
                 }
 
                 Rectangle()
@@ -267,15 +283,11 @@ struct PetWeatherAccent: View {
         guard allowsAnimation else { return 0.09 }
         if mood == .stormy {
             let period = WeatherSceneProfile(mood: mood).lightningPeriod ?? 24
-            let flashTime = normalizedPhase(time, period: period) * period
-            switch flashTime {
-            case 0..<0.07:
-                return 0.065 + (1 - flashTime / 0.07) * 0.15
-            case 0.12..<0.19:
-                return 0.065 + (1 - (flashTime - 0.12) / 0.07) * 0.08
-            default:
-                return 0.065
-            }
+            let flash = StormLightningSchedule.flashIntensity(
+                at: time,
+                period: period
+            )
+            return 0.065 + flash * 0.75
         }
         return 0.09 + (sin(normalizedPhase(time, period: 3.6) * .pi * 2) + 1) * 0.025
     }
