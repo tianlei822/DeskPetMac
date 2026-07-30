@@ -186,11 +186,13 @@ public enum PetAnimationDynamics {
         let sway = sin(phase)
         let hop = abs(sin(phase * 0.5))
         let counterMotion = sin(phase * 0.5 + .pi / 3)
+        // Brief squash each time a hop lands, like a foot hitting the ground.
+        let landing = pow(max(0, cos(phase * 0.5)), 8)
 
         return PetAnimationPose(
             x: sway * tuning.horizontalAmplitude * envelope,
             y: -hop * tuning.verticalAmplitude * envelope,
-            scale: 1 + hop * tuning.scaleAmplitude * envelope,
+            scale: 1 + (hop - landing * 0.9) * tuning.scaleAmplitude * envelope,
             tiltDegrees: (sway * tuning.tiltAmplitude + counterMotion) * envelope
         )
     }
@@ -211,11 +213,13 @@ public enum PetAnimationDynamics {
         case .dog: 1.1
         }
         let squeeze = settle * (0.9 + breath * 0.1) * characterEnergy
+        // Contented purr: a fine tremble layered over the slow squeeze.
+        let purr = sin(elapsed * 34) * settle
 
         return PetAnimationPose(
-            x: sin(elapsed * 1.7) * 0.5 * settle,
+            x: sin(elapsed * 1.7) * 0.5 * settle + purr * 0.18,
             y: -0.6 * squeeze,
-            scale: 1 + 0.02 * squeeze,
+            scale: 1 + 0.02 * squeeze + sin(elapsed * 34 + 1.2) * 0.004 * settle,
             tiltDegrees: sin(elapsed * 2.3) * 1.2 * settle * characterEnergy
         )
     }
@@ -224,7 +228,16 @@ public enum PetAnimationDynamics {
         for pet: PetKind,
         time: Double
     ) -> Bool {
-        guard time.isFinite else { return false }
+        blinkEnvelope(for: pet, time: time) > 0.5
+    }
+
+    /// Smooth 0...1 eyelid envelope for blink timing. Drives the sprite swap
+    /// threshold and lets the body add a coupled micro-squash at mid-blink.
+    public static func blinkEnvelope(
+        for pet: PetKind,
+        time: Double
+    ) -> Double {
+        guard time.isFinite else { return 0 }
 
         let timing: (period: Double, phase: Double, duration: Double, doubleEvery: Int) = switch pet {
         case .cat: (4.9, 0.8, 0.13, 3)
@@ -233,7 +246,10 @@ public enum PetAnimationDynamics {
         }
         let shiftedTime = time + timing.phase
         let cyclePosition = euclideanModulo(shiftedTime, modulus: timing.period)
-        if cyclePosition < timing.duration { return true }
+        let primary = blinkWindowEnvelope(
+            position: cyclePosition,
+            duration: timing.duration
+        )
 
         let cycleIndex = floor(shiftedTime / timing.period)
         let hasDoubleBlink = euclideanModulo(
@@ -241,9 +257,48 @@ public enum PetAnimationDynamics {
             modulus: Double(timing.doubleEvery)
         ) == 0
         let secondBlinkStart = timing.duration + 0.16
-        return hasDoubleBlink
-            && cyclePosition >= secondBlinkStart
-            && cyclePosition < secondBlinkStart + timing.duration * 0.82
+        let secondary = hasDoubleBlink
+            ? blinkWindowEnvelope(
+                position: cyclePosition - secondBlinkStart,
+                duration: timing.duration * 0.82
+            ) * 0.85
+            : 0
+
+        return min(1, max(primary, secondary))
+    }
+
+    /// Damped follow-through after a pat completes: a quick decaying wobble
+    /// that settles the body instead of snapping straight back to idle.
+    public static func patSettlePose(
+        for pet: PetKind,
+        elapsed: Double,
+        comboCount: Int
+    ) -> PetAnimationPose {
+        guard elapsed.isFinite, elapsed > 0 else { return .neutral }
+
+        let decay = exp(-elapsed * 6.5)
+        guard decay > 0.02 else { return .neutral }
+
+        let direction: Double = pet == .cat ? -1 : 1
+        let characterEnergy: Double = switch pet {
+        case .cat: 0.88
+        case .pauli: 0.72
+        case .dog: 1.15
+        }
+        let comboEnergy: Double = switch comboCount {
+        case 5...: 1.5
+        case 3...: 1.22
+        default: 1
+        }
+        let energy = characterEnergy * comboEnergy
+        let wobble = sin(elapsed * 16) * decay
+
+        return PetAnimationPose(
+            x: direction * wobble * 1.1 * energy,
+            y: wobble * -0.7 * energy,
+            scale: 1 + decay * 0.008 * energy,
+            tiltDegrees: direction * wobble * 1.6 * energy
+        )
     }
 
     public static func tailSwayDegrees(
@@ -268,6 +323,11 @@ public enum PetAnimationDynamics {
             time * tuning.frequency * 0.53 + tuning.phase * 1.7
         ) * 0.24
         return (primary + secondary) * tuning.amplitude / 1.24
+    }
+
+    private static func blinkWindowEnvelope(position: Double, duration: Double) -> Double {
+        guard position.isFinite, position >= 0, position < duration else { return 0 }
+        return sin(position / duration * .pi)
     }
 
     private static func smoothstep(_ value: Double) -> Double {

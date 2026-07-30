@@ -217,17 +217,23 @@ struct RealisticPetBody: View {
     let motionPreview: PetMotionEvent?
     let dragLeanAt: (TimeInterval) -> PetDragLean
     let cursorGaze: () -> CGSize?
+    let onDelight: () -> Void
 
     @State private var isShowingPat = false
     @State private var patTask: Task<Void, Never>?
     @State private var patGeneration = 0
     @State private var patStartedAt: TimeInterval?
     @State private var patCombo = 1
+    @State private var patSettleStartedAt: TimeInterval?
     @State private var danceStartedAt: TimeInterval?
     @State private var personalityStartedAt: TimeInterval?
     @State private var nuzzleStartedAt: TimeInterval?
     @State private var nuzzleReleasedAt: TimeInterval?
     @State private var nuzzleElapsedAtRelease: TimeInterval = 0
+    @State private var sleepStartedAt: TimeInterval?
+    @State private var isShowingDelight = false
+    @State private var delightStartedAt: TimeInterval?
+    @State private var dwellTask: Task<Void, Never>?
     @State private var motionArtworkReadyKind: PetKind?
     @State private var motionScheduleClock = PetMotionScheduleClock()
     @State private var artworkTransitions = PetArtworkTransitionStore()
@@ -353,6 +359,7 @@ struct RealisticPetBody: View {
             patGeneration += 1
             let generation = patGeneration
             patStartedAt = Date().timeIntervalSinceReferenceDate
+            patSettleStartedAt = nil
             patCombo = max(1, comboCount)
             isShowingPat = true
             patTask = Task { @MainActor in
@@ -364,11 +371,39 @@ struct RealisticPetBody: View {
                 guard !Task.isCancelled, generation == patGeneration else { return }
                 isShowingPat = false
                 patStartedAt = nil
+                patSettleStartedAt = Date().timeIntervalSinceReferenceDate
                 patTask = nil
             }
         }
         .onChange(of: isDancing) {
             danceStartedAt = isDancing ? Date().timeIntervalSinceReferenceDate : nil
+        }
+        .onChange(of: isSleeping) {
+            sleepStartedAt = isSleeping ? Date().timeIntervalSinceReferenceDate : nil
+        }
+        .onChange(of: isHovering) {
+            dwellTask?.cancel()
+            dwellTask = nil
+            isShowingDelight = false
+            delightStartedAt = nil
+            guard isHovering, !reduceMotion else { return }
+            dwellTask = Task { @MainActor in
+                try? await Task.sleep(for: .seconds(1.6))
+                guard !Task.isCancelled else { return }
+                guard isHovering,
+                      !isSleeping,
+                      !isDancing,
+                      !isShowingPat,
+                      !isNuzzling,
+                      personalityPose == nil else { return }
+                isShowingDelight = true
+                delightStartedAt = Date().timeIntervalSinceReferenceDate
+                onDelight()
+                try? await Task.sleep(for: .seconds(1.1))
+                guard !Task.isCancelled else { return }
+                isShowingDelight = false
+                delightStartedAt = nil
+            }
         }
         .onChange(of: personalityPose) {
             personalityStartedAt = personalityPose == nil
@@ -393,12 +428,18 @@ struct RealisticPetBody: View {
             patGeneration += 1
             isShowingPat = false
             patStartedAt = nil
+            patSettleStartedAt = nil
             patCombo = 1
             danceStartedAt = nil
             personalityStartedAt = nil
             nuzzleStartedAt = nil
             nuzzleReleasedAt = nil
             nuzzleElapsedAtRelease = 0
+            sleepStartedAt = nil
+            dwellTask?.cancel()
+            dwellTask = nil
+            isShowingDelight = false
+            delightStartedAt = nil
         }
     }
 
@@ -455,6 +496,7 @@ struct RealisticPetBody: View {
         if let personalityPose {
             return manifest.resourceName(for: .personality(personalityPose))
         }
+        if isShowingDelight { return manifest.resourceName(for: .personality(.perk)) }
         if isHovering { return manifest.resourceName(for: .hover) }
         if motion.event == .lookAround { return manifest.base }
         if motion.event != .idle {
@@ -484,11 +526,21 @@ struct RealisticPetBody: View {
         if isNuzzleActive(at: time) {
             return CGFloat(nuzzlePose(at: time).scale)
         }
+        if isShowingDelight {
+            return CGFloat(delightPose(at: time).scale)
+        }
         if isHovering {
             return CGFloat(attentionPose(at: time).scale)
         }
         let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
-        return 1 + CGFloat(idle.scale - 1) * idleAmplitudeMultiplier
+        // Couple the body to the eyelid so blinks feel organic, then layer
+        // any post-pat settle wobble on top of the idle breath.
+        let blink = PetAnimationDynamics.blinkEnvelope(for: kind, time: time)
+        let settle = patSettlePose(at: time)
+        return 1
+            + CGFloat(idle.scale - 1) * idleAmplitudeMultiplier
+            + CGFloat(settle.scale - 1)
+            - CGFloat(blink) * 0.004
     }
 
     private func composedHorizontalScale(
@@ -525,11 +577,15 @@ struct RealisticPetBody: View {
         if isNuzzleActive(at: time) {
             return nuzzlePose(at: time).tiltDegrees
         }
+        if isShowingDelight {
+            return delightPose(at: time).tiltDegrees
+        }
         if isHovering {
             return attentionPose(at: time).tiltDegrees
         }
 
         return PetAnimationDynamics.idlePose(for: kind, time: time).tiltDegrees
+            + patSettlePose(at: time).tiltDegrees
     }
 
     private func animatedOffset(
@@ -538,7 +594,14 @@ struct RealisticPetBody: View {
     ) -> CGSize {
         guard !reduceMotion else { return .zero }
 
-        if isSleeping { return .zero }
+        if isSleeping {
+            // Ease down into the nap instead of teleporting to the sleep pose.
+            let elapsed = elapsed(since: sleepStartedAt, at: time)
+            let dip = elapsed < 0.9
+                ? sin(min(1, elapsed / 0.9) * .pi) * 2.2
+                : 0
+            return CGSize(width: 0, height: dip)
+        }
         if isShowingPat {
             let pose = patPose(at: time)
             return CGSize(width: pose.x, height: pose.y)
@@ -554,6 +617,10 @@ struct RealisticPetBody: View {
             let pose = nuzzlePose(at: time)
             return CGSize(width: pose.x, height: pose.y)
         }
+        if isShowingDelight {
+            let pose = delightPose(at: time)
+            return CGSize(width: pose.x, height: pose.y)
+        }
         if isHovering {
             let attention = attentionPose(at: time)
             return CGSize(
@@ -563,9 +630,10 @@ struct RealisticPetBody: View {
         }
 
         let idle = PetAnimationDynamics.idlePose(for: kind, time: time)
+        let settle = patSettlePose(at: time)
         return CGSize(
-            width: idle.x,
-            height: idle.y * Double(idleAmplitudeMultiplier)
+            width: idle.x + settle.x,
+            height: idle.y * Double(idleAmplitudeMultiplier) + settle.y
         )
     }
 
@@ -802,13 +870,27 @@ struct RealisticPetBody: View {
             + CGFloat(motion.shadowOffset)
 
         return Ellipse()
-            .fill(Color.black.opacity(0.12))
+            .fill(Color.black.opacity(shadowOpacity))
             .frame(width: 105, height: 17)
             .blur(radius: 8)
             .scaleEffect(x: CGFloat(motion.shadowScale), y: 1)
             .offset(x: horizontalOffset, y: 79)
             .allowsHitTesting(false)
             .accessibilityHidden(true)
+    }
+
+    /// Overcast and storm light softens the contact shadow; direct sun
+    /// hardens it. Keeps the pet grounded to the same sky as the scene.
+    private var shadowOpacity: Double {
+        switch mood {
+        case .sunny: 0.14
+        case .cloudy: 0.10
+        case .foggy: 0.09
+        case .rainy: 0.11
+        case .snowy: 0.10
+        case .stormy: 0.13
+        case .cozy: 0.12
+        }
     }
 
     private func weatherOffset(at time: TimeInterval) -> CGSize {
@@ -891,6 +973,23 @@ struct RealisticPetBody: View {
             elapsed: elapsed(since: patStartedAt, at: time),
             comboCount: patCombo
         )
+    }
+
+    private func patSettlePose(at time: TimeInterval) -> PetAnimationPose {
+        guard !reduceMotion, patSettleStartedAt != nil else { return .neutral }
+        return PetAnimationDynamics.patSettlePose(
+            for: kind,
+            elapsed: elapsed(since: patSettleStartedAt, at: time),
+            comboCount: patCombo
+        )
+    }
+
+    private func delightPose(at time: TimeInterval) -> PetAnimationPose {
+        PetAnimationDynamics.patPose(
+            for: kind,
+            elapsed: elapsed(since: delightStartedAt, at: time),
+            comboCount: 1
+        ).scaled(by: 0.55)
     }
 
     private func dancePose(at time: TimeInterval) -> PetAnimationPose {

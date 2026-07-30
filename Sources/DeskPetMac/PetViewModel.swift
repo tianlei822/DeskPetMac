@@ -186,6 +186,14 @@ final class PetViewModel: ObservableObject {
         nuzzleTask = nil
     }
 
+    /// A quiet "you noticed me" moment: one small heart and a play point,
+    /// triggered when the pointer lingers on the pet.
+    func delight() {
+        heartBurst += 1
+        bond.registerPlay(points: 1)
+        persistBond()
+    }
+
     func dragLean(at time: TimeInterval) -> PetDragLean {
         dragLeanTracker.lean(at: time)
     }

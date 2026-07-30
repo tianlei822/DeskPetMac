@@ -75,7 +75,8 @@ struct PetWindowView: View {
                                     reduceMotion: reduceMotion,
                                     motionPreview: motionPreview,
                                     dragLeanAt: { time in model.dragLean(at: time) },
-                                    cursorGaze: { model.cursorGazeOffset }
+                                    cursorGaze: { model.cursorGazeOffset },
+                                    onDelight: { model.delight() }
                                 )
                             } else {
                                 VectorPetBody(
@@ -98,6 +99,10 @@ struct PetWindowView: View {
                         LongPressGesture(minimumDuration: 0.5, maximumDistance: 24)
                             .onChanged { _ in model.beginNuzzle() }
                             .onEnded { _ in model.endNuzzle() }
+                    )
+                    .simultaneousGesture(
+                        TapGesture(count: 2)
+                            .onEnded { _ in model.dance() }
                     )
                     .frame(
                         width: SceneMetrics.artworkSize.width,
@@ -195,6 +200,7 @@ struct PetWindowView: View {
         .animation(.spring(response: 0.32, dampingFraction: 0.6), value: model.comboCount)
         .animation(.easeInOut(duration: 0.3), value: model.isSleeping)
         .animation(.easeInOut(duration: 0.22), value: model.isReminderVisible)
+        .animation(.easeInOut(duration: 0.2), value: model.isStatusVisible)
         .animation(
             reduceMotion ? .linear(duration: 0.12) : .spring(response: 0.32, dampingFraction: 0.76),
             value: model.activePersonalityMoment?.id
@@ -239,6 +245,13 @@ struct PetWindowView: View {
         if model.isReminderVisible {
             BreakBubble(model: model)
                 .transition(.move(edge: .top).combined(with: .opacity))
+        } else if model.isStatusVisible {
+            StatusBubble(model: model, mood: displayedMood)
+                .transition(
+                    reduceMotion
+                        ? .opacity
+                        : .move(edge: .top).combined(with: .opacity)
+                )
         } else if let moment = model.activePersonalityMoment {
             PersonalityBubble(moment: moment)
                 .transition(
@@ -277,6 +290,58 @@ private struct BreakBubble: View {
     }
 }
 
+private struct StatusBubble: View {
+    @ObservedObject var model: PetViewModel
+    let mood: PetWeatherMood
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.bondTitle)
+                    .font(.system(size: 11, weight: .bold, design: .rounded))
+                HStack(spacing: 2) {
+                    ForEach(0..<model.bondHearts, id: \.self) { _ in
+                        Image(systemName: "heart.fill")
+                            .font(.system(size: 8))
+                            .foregroundStyle(.pink)
+                    }
+                }
+                ProgressView(value: model.bondProgress)
+                    .progressViewStyle(.linear)
+                    .tint(.pink)
+                    .frame(width: 86)
+            }
+
+            Divider()
+                .frame(height: 34)
+
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(mood.displayName)
+                    .font(.system(size: 11, weight: .semibold, design: .rounded))
+                Text(model.weather.temperatureLabel)
+                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                Text(model.weather.locationName)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+        }
+        .padding(.horizontal, 13)
+        .padding(.vertical, 9)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 15, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 15, style: .continuous)
+                .stroke(.white.opacity(0.32), lineWidth: 1)
+        )
+        .shadow(color: .black.opacity(0.10), radius: 7, y: 3)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(model.bondTitle). \(mood.displayName) \(model.weather.temperatureLabel) in \(model.weather.locationName)"
+        )
+    }
+}
+
 private struct ControlStrip: View {
     @ObservedObject var model: PetViewModel
     let isVisible: Bool
@@ -295,31 +360,23 @@ private struct ControlStrip: View {
                     Text("Pet")
                         .font(.headline)
                     HStack(spacing: 8) {
-                        Button {
-                            model.selectPetKind(.cat)
-                        } label: {
-                            Label("Cat", systemImage: "sparkle")
-                        }
-                        .buttonStyle(PetChoiceButtonStyle(isSelected: model.petKind == .cat, tint: .purple))
-
-                        Button {
-                            model.selectPetKind(.pauli)
-                        } label: {
-                            Label("Pauli", systemImage: "sparkles")
-                        }
-                        .buttonStyle(PetChoiceButtonStyle(isSelected: model.petKind == .pauli, tint: .cyan))
-
-                        Button {
-                            model.selectPetKind(.dog)
-                        } label: {
-                            Label("Dog", systemImage: "dog.fill")
-                        }
-                        .buttonStyle(
-                            PetChoiceButtonStyle(
-                                isSelected: model.petKind == .dog,
-                                tint: .orange
+                        ForEach(PetKind.allCases, id: \.self) { kind in
+                            Button {
+                                model.selectPetKind(kind)
+                            } label: {
+                                VStack(spacing: 4) {
+                                    PetChoiceThumbnail(kind: kind)
+                                    Text(kind.displayName)
+                                        .font(.system(size: 11, weight: .semibold, design: .rounded))
+                                }
+                            }
+                            .buttonStyle(
+                                PetChoiceButtonStyle(
+                                    isSelected: model.petKind == kind,
+                                    tint: pickerTint(for: kind)
+                                )
                             )
-                        )
+                        }
                     }
                 }
                 .padding(14)
@@ -1243,6 +1300,34 @@ private struct PetActionButtonStyle: ButtonStyle {
             .padding(.horizontal, 12)
             .padding(.vertical, 6)
             .background(tint.opacity(configuration.isPressed ? 0.70 : 0.92), in: Capsule())
+    }
+}
+
+private struct PetChoiceThumbnail: View {
+    let kind: PetKind
+
+    var body: some View {
+        if let image = PetArtworkLoader.image(
+            named: PetArtworkManifest(petKind: kind).base
+        ) {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+                .frame(width: 46, height: 46)
+        } else {
+            Image(systemName: "pawprint.fill")
+                .font(.system(size: 22))
+                .frame(width: 46, height: 46)
+        }
+    }
+}
+
+private func pickerTint(for kind: PetKind) -> Color {
+    switch kind {
+    case .cat: .purple
+    case .pauli: .cyan
+    case .dog: .orange
     }
 }
 

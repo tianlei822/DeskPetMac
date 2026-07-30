@@ -720,6 +720,122 @@ struct PetAnimationDynamicsTests {
     }
 }
 
+@Suite("Pet animation polish")
+struct PetAnimationPolishTests {
+    @Test("blink envelope is a smooth bounded cycle")
+    func blinkEnvelopeIsSmoothAndBounded() {
+        for pet in PetKind.allCases {
+            var sawClosure = false
+            var previous = 0.0
+            for time in stride(from: 0.0, through: 30.0, by: 0.01) {
+                let phase = PetAnimationDynamics.blinkEnvelope(for: pet, time: time)
+                #expect(phase.isFinite)
+                #expect((0...1).contains(phase))
+                if phase > 0.9 { sawClosure = true }
+                #expect(abs(phase - previous) < 0.4)
+                previous = phase
+            }
+            #expect(sawClosure)
+        }
+        #expect(PetAnimationDynamics.blinkEnvelope(for: .cat, time: .nan) == 0)
+    }
+
+    @Test("blink flag fires exactly when the envelope is mostly closed")
+    func blinkFlagMatchesEnvelope() {
+        for pet in PetKind.allCases {
+            for time in stride(from: 0.0, through: 25.0, by: 0.017) {
+                let flag = PetAnimationDynamics.isBlinking(for: pet, time: time)
+                let phase = PetAnimationDynamics.blinkEnvelope(for: pet, time: time)
+                #expect(flag == (phase > 0.5))
+            }
+        }
+    }
+
+    @Test("pat settle decays back to neutral")
+    func patSettleDecaysToNeutral() {
+        for pet in PetKind.allCases {
+            #expect(PetAnimationDynamics.patSettlePose(
+                for: pet,
+                elapsed: 0,
+                comboCount: 1
+            ) == .neutral)
+            #expect(PetAnimationDynamics.patSettlePose(
+                for: pet,
+                elapsed: .nan,
+                comboCount: 1
+            ) == .neutral)
+
+            var sawWobble = false
+            for elapsed in stride(from: 0.01, through: 2.0, by: 0.01) {
+                let pose = PetAnimationDynamics.patSettlePose(
+                    for: pet,
+                    elapsed: elapsed,
+                    comboCount: 3
+                )
+                #expect(pose.x.isFinite)
+                #expect(pose.y.isFinite)
+                #expect(pose.scale.isFinite)
+                #expect(pose.tiltDegrees.isFinite)
+                #expect(abs(pose.x) <= 2.5)
+                #expect(abs(pose.tiltDegrees) <= 3.5)
+                if abs(pose.tiltDegrees) > 0.3 { sawWobble = true }
+            }
+            #expect(sawWobble)
+            #expect(PetAnimationDynamics.patSettlePose(
+                for: pet,
+                elapsed: 2.0,
+                comboCount: 3
+            ) == .neutral)
+        }
+    }
+
+    @Test("pat settle scales with combo energy")
+    func patSettleScalesWithCombo() {
+        for pet in PetKind.allCases {
+            let soft = settlePeak(pet: pet, comboCount: 1)
+            let celebration = settlePeak(pet: pet, comboCount: 5)
+            #expect(celebration > soft)
+        }
+    }
+
+    @Test("dance hops squash on landing")
+    func danceSquashesOnLanding() {
+        for pet in PetKind.allCases {
+            var lowestScale = Double.greatestFiniteMagnitude
+            for elapsed in stride(from: 0.05, through: 1.75, by: 0.01) {
+                let pose = PetAnimationDynamics.dancePose(for: pet, elapsed: elapsed)
+                lowestScale = min(lowestScale, pose.scale)
+            }
+            #expect(lowestScale < 1)
+        }
+    }
+
+    @Test("nuzzle purr stays within the established bounds")
+    func nuzzlePurrStaysBounded() {
+        for pet in PetKind.allCases {
+            for elapsed in stride(from: 0.01, through: 10.0, by: 0.05) {
+                let pose = PetAnimationDynamics.nuzzlePose(for: pet, elapsed: elapsed)
+                #expect(abs(pose.x) <= 1)
+                #expect(abs(pose.tiltDegrees) <= 2)
+                #expect(abs(pose.scale - 1) <= 0.03)
+            }
+        }
+    }
+
+    private func settlePeak(pet: PetKind, comboCount: Int) -> Double {
+        var peak = 0.0
+        for elapsed in stride(from: 0.01, through: 1.0, by: 0.01) {
+            let pose = PetAnimationDynamics.patSettlePose(
+                for: pet,
+                elapsed: elapsed,
+                comboCount: comboCount
+            )
+            peak = max(peak, abs(pose.tiltDegrees))
+        }
+        return peak
+    }
+}
+
 @Suite("Pet motion director")
 struct PetMotionDirectorTests {
     @Test("scheduled motion includes three additional gestures")
