@@ -4,37 +4,209 @@ import ImageIO
 import SwiftUI
 
 struct PetArtworkBlend {
+    static let minimumBridgeOpacity = 0.82
+
     let baseOpacity: Double
     let currentOpacity: Double
     let nextOpacity: Double
 
     init(motion: PetMotionFrame) {
         let eventOpacity = min(1, max(0, motion.artworkOpacity))
-        let nextFrameBlend = motion.nextArtworkFrameIndex == nil
-            ? 0
-            : min(1, max(0, motion.artworkBlend))
+        let distanceFromSwitch = min(1, abs(eventOpacity - 0.5) * 2)
+        let easedDistance = distanceFromSwitch * distanceFromSwitch
+            * (3 - 2 * distanceFromSwitch)
+        let selectedOpacity = Self.minimumBridgeOpacity
+            + (1 - Self.minimumBridgeOpacity) * easedDistance
 
-        baseOpacity = 1 - eventOpacity
-        currentOpacity = eventOpacity * (1 - nextFrameBlend)
-        nextOpacity = eventOpacity * nextFrameBlend
+        if motion.usesEventArtwork {
+            baseOpacity = 0
+            currentOpacity = selectedOpacity
+        } else {
+            baseOpacity = selectedOpacity
+            currentOpacity = 0
+        }
+        // Full-body raster frames have slightly different head registration.
+        // Presenting both at once creates a visible doubled or detached head.
+        nextOpacity = 0
     }
 }
 
-enum PetArtworkAnimationPolicy {
-    static func usesIndependentTailLayer(
-        for kind: PetKind,
-        reduceMotion: Bool,
-        isSleeping: Bool,
-        isHovering: Bool,
-        isShowingPat: Bool,
-        hasPersonalityPose: Bool
+enum PetTailArtworkPolicy {
+    static func supportsIndependentTail(
+        kind: PetKind,
+        resourceName: String
     ) -> Bool {
-        kind != .pauli
-            && !reduceMotion
-            && !isSleeping
-            && !isHovering
-            && !isShowingPat
-            && !hasPersonalityPose
+        guard kind == .cat || kind == .dog else { return false }
+        let manifest = PetArtworkManifest(petKind: kind)
+        return resourceName == manifest.base || resourceName == manifest.blink
+    }
+}
+
+struct PetTailPose: Equatable {
+    let midDegrees: Double
+    let tipDegrees: Double
+
+    static let neutral = PetTailPose(midDegrees: 0, tipDegrees: 0)
+}
+
+enum PetTailMotion {
+    static func pose(
+        for kind: PetKind,
+        time: TimeInterval,
+        energy: Double,
+        curiosity: Double,
+        socialNeed: Double
+    ) -> PetTailPose {
+        guard time.isFinite,
+              energy.isFinite,
+              curiosity.isFinite,
+              socialNeed.isFinite else { return .neutral }
+
+        let safeEnergy = clampUnit(energy)
+        let safeCuriosity = clampUnit(curiosity)
+        let safeSocialNeed = clampUnit(socialNeed)
+        switch kind {
+        case .cat:
+            let speed = 0.72 + safeEnergy * 0.30
+            let midAmplitude = 2.2 + safeCuriosity * 1.8
+            let tipAmplitude = 3.4 + safeCuriosity * 2.5
+            let flickPhase = time.truncatingRemainder(dividingBy: 7.6)
+            let flick: Double
+            if flickPhase >= 0, flickPhase < 0.9 {
+                let progress = flickPhase / 0.9
+                flick = sin(progress * .pi)
+                    * sin(progress * .pi * 2)
+                    * (1 + safeCuriosity * 1.5)
+            } else {
+                flick = 0
+            }
+            return PetTailPose(
+                midDegrees: sin(time * speed) * midAmplitude,
+                tipDegrees: sin(time * speed - 0.65) * tipAmplitude + flick
+            )
+        case .dog:
+            let speed = 3.0 + safeEnergy * 1.2 + safeSocialNeed * 0.25
+            let midAmplitude = 4.5 + safeSocialNeed * 3.2
+            let tipAmplitude = 6.0 + safeSocialNeed * 4.5
+            return PetTailPose(
+                midDegrees: sin(time * speed) * midAmplitude
+                    + sin(time * speed * 2) * 0.6,
+                tipDegrees: sin(time * speed - 0.55) * tipAmplitude
+                    + sin(time * speed * 2 - 0.2) * 1.3
+            )
+        case .pauli:
+            return .neutral
+        }
+    }
+
+    private static func clampUnit(_ value: Double) -> Double {
+        min(1, max(0, value))
+    }
+}
+
+enum PetTailSegment {
+    case movingRegion
+    case middle
+    case tip
+}
+
+struct PetTailMask: Shape {
+    let kind: PetKind
+    let segment: PetTailSegment
+
+    func path(in rect: CGRect) -> Path {
+        switch (kind, segment) {
+        case (.cat, .movingRegion):
+            var path = Path()
+            path.move(to: point(x: 0.50, y: 0, in: rect))
+            path.addLine(to: point(x: 0.78, y: 0, in: rect))
+            path.addLine(to: point(x: 0.78, y: 0.30, in: rect))
+            path.addLine(to: point(x: 0.62, y: 0.30, in: rect))
+            path.addLine(to: point(x: 0.62, y: 0.17, in: rect))
+            path.addLine(to: point(x: 0.50, y: 0.17, in: rect))
+            path.closeSubpath()
+            return path
+        case (.cat, .middle):
+            return Path(CGRect(
+                x: rect.width * 0.61,
+                y: rect.height * 0.105,
+                width: rect.width * 0.17,
+                height: rect.height * 0.205
+            ))
+        case (.cat, .tip):
+            return Path(CGRect(
+                x: rect.width * 0.50,
+                y: 0,
+                width: rect.width * 0.28,
+                height: rect.height * 0.145
+            ))
+        case (.dog, .movingRegion):
+            return Path(CGRect(
+                x: rect.width * 0.40,
+                y: 0,
+                width: rect.width * 0.36,
+                height: rect.height * 0.255
+            ))
+        case (.dog, .middle):
+            return Path(CGRect(
+                x: rect.width * 0.44,
+                y: rect.height * 0.105,
+                width: rect.width * 0.32,
+                height: rect.height * 0.16
+            ))
+        case (.dog, .tip):
+            return Path(CGRect(
+                x: rect.width * 0.40,
+                y: 0,
+                width: rect.width * 0.36,
+                height: rect.height * 0.145
+            ))
+        case (.pauli, _):
+            return Path()
+        }
+    }
+
+    private func point(x: Double, y: Double, in rect: CGRect) -> CGPoint {
+        CGPoint(x: rect.width * x, y: rect.height * y)
+    }
+}
+
+struct PetMotionContextLatch: Equatable {
+    private(set) var activeState: PetAutonomyState
+    private var pendingState: PetAutonomyState?
+
+    init(activeState: PetAutonomyState = .neutral) {
+        self.activeState = activeState
+    }
+
+    mutating func reset(to state: PetAutonomyState) {
+        activeState = state
+        pendingState = nil
+    }
+
+    @discardableResult
+    mutating func observe(
+        _ state: PetAutonomyState,
+        while event: PetMotionEvent
+    ) -> Bool {
+        guard event != .idle else {
+            pendingState = nil
+            guard state != activeState else { return false }
+            activeState = state
+            return true
+        }
+
+        pendingState = state == activeState ? nil : state
+        return false
+    }
+
+    @discardableResult
+    mutating func reachedIdleBoundary() -> Bool {
+        guard let pendingState else { return false }
+        self.pendingState = nil
+        guard pendingState != activeState else { return false }
+        activeState = pendingState
+        return true
     }
 }
 
@@ -50,21 +222,23 @@ struct PetArtworkCrossfade {
     }
 }
 
-/// Tracks the presented presentation-state artwork and blends through changes
-/// (blink, hover, pat, sleep, personality) instead of hard-cutting between images.
+/// Tracks presentation-state artwork. Aligned base/blink frames crossfade;
+/// larger pose changes use a one-layer opacity bridge to avoid double images.
 @MainActor
 final class PetArtworkTransitionStore {
-    static let standardDuration = 0.16
+    static let standardDuration = 0.24
     static let blinkDuration = 0.07
 
     private(set) var presentedName: String?
     private var outgoingName: String?
     private var startedAt = 0.0
     private var duration = 0.0
+    private var usesCrossfade = false
 
     func reset() {
         presentedName = nil
         outgoingName = nil
+        usesCrossfade = false
     }
 
     func layers(
@@ -87,9 +261,11 @@ final class PetArtworkTransitionStore {
             presentedName = requested
         } else if requested != presentedName {
             outgoingName = presentedName
-            let blinkInvolved = requested.hasSuffix("/blink")
-                || presentedName?.hasSuffix("/blink") == true
-            duration = blinkInvolved ? Self.blinkDuration : Self.standardDuration
+            usesCrossfade = Self.isAlignedBlinkPair(
+                from: presentedName,
+                to: requested
+            )
+            duration = usesCrossfade ? Self.blinkDuration : Self.standardDuration
             startedAt = time
             presentedName = requested
         }
@@ -102,8 +278,40 @@ final class PetArtworkTransitionStore {
             outgoingName = nil
             return (requested, 1, nil, 0)
         }
-        let fade = PetArtworkCrossfade(progress: progress)
-        return (requested, fade.currentOpacity, outgoing, fade.outgoingOpacity)
+        if usesCrossfade {
+            let fade = PetArtworkCrossfade(progress: progress)
+            return (requested, fade.currentOpacity, outgoing, fade.outgoingOpacity)
+        }
+
+        let normalizedDistance: Double
+        if progress < 0.5 {
+            normalizedDistance = 1 - progress * 2
+        } else {
+            normalizedDistance = progress * 2 - 1
+        }
+        let easedDistance = normalizedDistance * normalizedDistance
+            * (3 - 2 * normalizedDistance)
+        let opacity = PetArtworkBlend.minimumBridgeOpacity
+            + (1 - PetArtworkBlend.minimumBridgeOpacity) * easedDistance
+        if progress < 0.5 {
+            return (requested, 0, outgoing, opacity)
+        }
+        return (requested, opacity, outgoing, 0)
+    }
+
+    private static func isAlignedBlinkPair(
+        from outgoing: String?,
+        to incoming: String
+    ) -> Bool {
+        guard let outgoing else { return false }
+        let outgoingComponents = outgoing.split(separator: "/")
+        let incomingComponents = incoming.split(separator: "/")
+        guard outgoingComponents.dropLast().elementsEqual(
+            incomingComponents.dropLast()
+        ), let outgoingName = outgoingComponents.last,
+           let incomingName = incomingComponents.last else { return false }
+        return Set([String(outgoingName), String(incomingName)])
+            == Set(["base", "blink"])
     }
 }
 
@@ -204,7 +412,7 @@ enum PetArtworkLoader {
 
 struct RealisticPetBody: View {
     let kind: PetKind
-    let mood: PetWeatherMood
+    let weatherProfile: WeatherSceneProfile
     let isHovering: Bool
     let pulse: Int
     let comboCount: Int
@@ -213,6 +421,7 @@ struct RealisticPetBody: View {
     let isNuzzling: Bool
     let personalityPose: PersonalityPose?
     let pointerOffset: CGSize
+    let autonomyState: PetAutonomyState
     let reduceMotion: Bool
     let motionPreview: PetMotionEvent?
     let dragLeanAt: (TimeInterval) -> PetDragLean
@@ -236,7 +445,10 @@ struct RealisticPetBody: View {
     @State private var dwellTask: Task<Void, Never>?
     @State private var motionArtworkReadyKind: PetKind?
     @State private var motionScheduleClock = PetMotionScheduleClock()
+    @State private var motionContext = PetMotionContextLatch()
     @State private var artworkTransitions = PetArtworkTransitionStore()
+
+    private var mood: PetWeatherMood { weatherProfile.mood }
 
     var body: some View {
         TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { timeline in
@@ -276,7 +488,7 @@ struct RealisticPetBody: View {
 
                                 PetWeatherLighting(
                                     kind: kind,
-                                    mood: mood,
+                                    profile: weatherProfile,
                                     time: time,
                                     reduceMotion: reduceMotion
                                 )
@@ -332,12 +544,28 @@ struct RealisticPetBody: View {
                     motionScheduleClock.resumeAfterWeather(at: time)
                 }
             }
+            .onChange(of: autonomyState) {
+                guard motionPreview == nil else { return }
+                if motionContext.observe(
+                    autonomyState,
+                    while: candidateMotion.event
+                ) {
+                    restartMotionSchedule(at: time)
+                }
+            }
+            .onChange(of: candidateMotion.event) {
+                guard motionPreview == nil,
+                      candidateMotion.event == .idle,
+                      motionContext.reachedIdleBoundary() else { return }
+                restartMotionSchedule(at: time)
+            }
         }
         .frame(width: 220, height: 218)
         .task(id: kind) {
             let requestedKind = kind
             motionArtworkReadyKind = nil
             motionScheduleClock.updateEligibility(false, at: 0)
+            motionContext.reset(to: autonomyState)
             artworkTransitions.reset()
             let isComplete = await PetArtworkLoader.preloadMotionArtwork(
                 for: requestedKind
@@ -480,7 +708,18 @@ struct RealisticPetBody: View {
             time: relativeTime,
             seed: motionSeed,
             isEligible: true,
-            reduceMotion: reduceMotion
+            reduceMotion: reduceMotion,
+            autonomyState: motionContext.activeState
+        )
+    }
+
+    private func restartMotionSchedule(at time: TimeInterval) {
+        motionScheduleClock.updateEligibility(false, at: time)
+        let strongWeatherReactionActive = PetMotionDirector
+            .isStrongWeatherReactionActive(weatherReaction, time: time)
+        motionScheduleClock.updateEligibility(
+            allowsScheduledMotionBase && !strongWeatherReactionActive,
+            at: time
         )
     }
 
@@ -676,35 +915,24 @@ struct RealisticPetBody: View {
         time: TimeInterval,
         motion: PetMotionFrame
     ) -> some View {
+        let eyeDirection = eyeGazeDirection(at: time, motion: motion)
         if motion.event != .idle, motion.event != .lookAround {
             let blend = PetArtworkBlend(motion: motion)
             ZStack {
                 motionArtwork(
                     named: manifest.base,
                     opacity: blend.baseOpacity,
-                    time: time,
-                    motion: motion
+                    time: time
                 )
                 motionArtwork(
                     named: manifest.resourceName(
                         for: motion.event,
-                        frameIndex: motion.artworkFrameIndex
+                        frameIndex: motion.presentedArtworkFrameIndex
+                            ?? motion.artworkFrameIndex
                     ),
                     opacity: blend.currentOpacity,
-                    time: time,
-                    motion: motion
+                    time: time
                 )
-                if let nextArtworkFrameIndex = motion.nextArtworkFrameIndex {
-                    motionArtwork(
-                        named: manifest.resourceName(
-                            for: motion.event,
-                            frameIndex: nextArtworkFrameIndex
-                        ),
-                        opacity: blend.nextOpacity,
-                        time: time,
-                        motion: motion
-                    )
-                }
             }
             .compositingGroup()
         } else {
@@ -720,9 +948,19 @@ struct RealisticPetBody: View {
             )
             ZStack {
                 if let outgoing = layers.outgoing, layers.outgoingOpacity > 0 {
-                    transitionedArtwork(named: outgoing, opacity: layers.outgoingOpacity, time: time, motion: motion)
+                    transitionedArtwork(
+                        named: outgoing,
+                        opacity: layers.outgoingOpacity,
+                        time: time,
+                        eyeDirection: eyeDirection
+                    )
                 }
-                transitionedArtwork(named: layers.current, opacity: layers.currentOpacity, time: time, motion: motion)
+                transitionedArtwork(
+                    named: layers.current,
+                    opacity: layers.currentOpacity,
+                    time: time,
+                    eyeDirection: eyeDirection
+                )
             }
         }
     }
@@ -732,12 +970,17 @@ struct RealisticPetBody: View {
         named resourceName: String,
         opacity: Double,
         time: TimeInterval,
-        motion: PetMotionFrame
+        eyeDirection: CGSize?
     ) -> some View {
         if opacity > 0,
            let artwork = PetArtworkLoader.image(named: resourceName)
                ?? PetArtworkLoader.image(named: PetArtworkManifest(petKind: kind).base) {
-            animatedArtwork(artwork, time: time, motion: motion)
+            presentedArtwork(
+                artwork,
+                named: resourceName,
+                time: time,
+                eyeDirection: eyeDirection
+            )
                 .opacity(opacity)
         }
     }
@@ -746,68 +989,115 @@ struct RealisticPetBody: View {
     private func motionArtwork(
         named resourceName: String,
         opacity: Double,
-        time: TimeInterval,
-        motion: PetMotionFrame
+        time: TimeInterval
     ) -> some View {
         if opacity > 0,
            let artwork = PetArtworkLoader.image(named: resourceName)
             ?? PetArtworkLoader.image(named: PetArtworkManifest(petKind: kind).base) {
-            animatedArtwork(artwork, time: time, motion: motion)
+            presentedArtwork(
+                artwork,
+                named: resourceName,
+                time: time,
+                eyeDirection: nil
+            )
                 .opacity(opacity)
         }
     }
 
     @ViewBuilder
-    private func animatedArtwork(
+    private func presentedArtwork(
         _ artwork: NSImage,
+        named resourceName: String,
         time: TimeInterval,
-        motion: PetMotionFrame
+        eyeDirection: CGSize?
     ) -> some View {
-        if !PetArtworkAnimationPolicy.usesIndependentTailLayer(
-            for: kind,
-            reduceMotion: reduceMotion,
-            isSleeping: isSleeping,
-            isHovering: isHovering,
-            isShowingPat: isShowingPat,
-            hasPersonalityPose: personalityPose != nil
-        ) {
-            artworkImage(artwork)
-        } else {
-            let sway = PetAnimationDynamics.tailSwayDegrees(
-                for: kind,
-                time: time,
-                isWalking: motion.event == .walk
-            )
-
-            ZStack {
+        ZStack {
+            if !reduceMotion,
+               PetTailArtworkPolicy.supportsIndependentTail(
+                   kind: kind,
+                   resourceName: resourceName
+               ) {
+                flexibleTailArtwork(artwork, time: time)
+            } else {
                 artworkImage(artwork)
-                    .mask {
-                        ZStack {
-                            Rectangle().fill(.white)
-                            TailTipMask(kind: kind)
-                                .fill(.white)
-                                .blendMode(.destinationOut)
-                        }
-                        .compositingGroup()
-                    }
+            }
 
-                artworkImage(artwork)
-                    .mask {
-                        TailTipMask(kind: kind).fill(.white)
-                    }
-                    .rotationEffect(
-                        .degrees(sway),
-                        anchor: tailRotationAnchor
-                    )
+            if let eyeDirection,
+               let artworkPose = PetEyeArtworkPolicy.pose(
+                   kind: kind,
+                   resourceName: resourceName
+               ) {
+                PetEyeGazeOverlay(
+                    kind: kind,
+                    artworkPose: artworkPose,
+                    direction: eyeDirection
+                )
+                .animation(
+                    .interactiveSpring(response: 0.18, dampingFraction: 0.86),
+                    value: eyeDirection
+                )
             }
         }
     }
 
-    private var tailRotationAnchor: UnitPoint {
+    private func flexibleTailArtwork(
+        _ artwork: NSImage,
+        time: TimeInterval
+    ) -> some View {
+        let pose = PetTailMotion.pose(
+            for: kind,
+            time: time,
+            energy: autonomyState.energy,
+            curiosity: autonomyState.curiosity,
+            socialNeed: autonomyState.socialNeed
+        )
+        let anchors = tailAnchors
+
+        return ZStack {
+            artworkImage(artwork)
+                .mask {
+                    ZStack {
+                        Rectangle().fill(.white)
+                        PetTailMask(kind: kind, segment: .movingRegion)
+                            .fill(.white)
+                            .blendMode(.destinationOut)
+                    }
+                    .compositingGroup()
+                }
+
+            artworkImage(artwork)
+                .mask {
+                    PetTailMask(kind: kind, segment: .middle).fill(.white)
+                }
+                .rotationEffect(
+                    .degrees(pose.midDegrees),
+                    anchor: anchors.middle
+                )
+
+            artworkImage(artwork)
+                .mask {
+                    PetTailMask(kind: kind, segment: .tip).fill(.white)
+                }
+                .rotationEffect(
+                    .degrees(pose.tipDegrees),
+                    anchor: anchors.tip
+                )
+                .rotationEffect(
+                    .degrees(pose.midDegrees),
+                    anchor: anchors.middle
+                )
+        }
+        .compositingGroup()
+    }
+
+    private var tailAnchors: (middle: UnitPoint, tip: UnitPoint) {
         switch kind {
-        case .cat: UnitPoint(x: 0.69, y: 0.38)
-        case .dog: UnitPoint(x: 0.58, y: 0.32)
-        case .pauli: .center
+        case .cat:
+            (UnitPoint(x: 0.66, y: 0.30), UnitPoint(x: 0.67, y: 0.125))
+        case .dog:
+            (UnitPoint(x: 0.55, y: 0.255), UnitPoint(x: 0.54, y: 0.125))
+        case .pauli:
+            (.center, .center)
         }
     }
 
@@ -1023,6 +1313,26 @@ struct RealisticPetBody: View {
         return time - nuzzleReleasedAt < 0.6
     }
 
+    private func eyeGazeDirection(
+        at time: TimeInterval,
+        motion: PetMotionFrame
+    ) -> CGSize? {
+        guard !reduceMotion,
+              !isSleeping,
+              !isDancing,
+              !isShowingPat,
+              !isShowingDelight,
+              !isNuzzleActive(at: time),
+              personalityPose == nil,
+              motion.event == .idle else { return nil }
+
+        if isHovering {
+            return PetEyeGazeMotion.direction(for: pointerOffset)
+        }
+        guard let offset = cursorGaze() else { return nil }
+        return PetEyeGazeMotion.direction(for: offset)
+    }
+
     private func gazePose(at time: TimeInterval, motion: PetMotionFrame) -> PetAnimationPose {
         guard !reduceMotion,
               !isSleeping,
@@ -1052,36 +1362,5 @@ struct RealisticPetBody: View {
     ) -> TimeInterval {
         guard let start, time.isFinite else { return 0 }
         return max(0, time - start)
-    }
-}
-
-private struct TailTipMask: Shape {
-    let kind: PetKind
-
-    func path(in rect: CGRect) -> Path {
-        var path = Path()
-        switch kind {
-        case .cat:
-            path.move(to: CGPoint(x: rect.width * 0.50, y: 0))
-            path.addLine(to: CGPoint(x: rect.width, y: 0))
-            path.addLine(to: CGPoint(x: rect.width, y: rect.height * 0.44))
-            path.addLine(to: CGPoint(x: rect.width * 0.67, y: rect.height * 0.44))
-            path.addLine(to: CGPoint(x: rect.width * 0.67, y: rect.height * 0.18))
-            path.addLine(to: CGPoint(x: rect.width * 0.50, y: rect.height * 0.18))
-            path.closeSubpath()
-        case .dog:
-            path.addRoundedRect(
-                in: CGRect(
-                    x: rect.width * 0.38,
-                    y: 0,
-                    width: rect.width * 0.40,
-                    height: rect.height * 0.27
-                ),
-                cornerSize: CGSize(width: 12, height: 12)
-            )
-        case .pauli:
-            break
-        }
-        return path
     }
 }

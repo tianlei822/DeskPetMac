@@ -2,13 +2,13 @@ import DeskPetCore
 import SwiftUI
 
 struct WeatherBackdrop: View {
-    let mood: PetWeatherMood
+    let profile: WeatherSceneProfile
     let pointerOffset: CGSize
     let reduceMotion: Bool
 
     var body: some View {
         WeatherAtmosphereLayer(
-            mood: mood,
+            profile: profile,
             layer: .background,
             pointerOffset: pointerOffset,
             reduceMotion: reduceMotion
@@ -19,13 +19,13 @@ struct WeatherBackdrop: View {
 }
 
 struct WeatherMidground: View {
-    let mood: PetWeatherMood
+    let profile: WeatherSceneProfile
     let pointerOffset: CGSize
     let reduceMotion: Bool
 
     var body: some View {
         WeatherAtmosphereLayer(
-            mood: mood,
+            profile: profile,
             layer: .midground,
             pointerOffset: pointerOffset,
             reduceMotion: reduceMotion
@@ -36,13 +36,13 @@ struct WeatherMidground: View {
 }
 
 struct WeatherForeground: View {
-    let mood: PetWeatherMood
+    let profile: WeatherSceneProfile
     let pointerOffset: CGSize
     let reduceMotion: Bool
 
     var body: some View {
         WeatherAtmosphereLayer(
-            mood: mood,
+            profile: profile,
             layer: .foreground,
             pointerOffset: pointerOffset,
             reduceMotion: reduceMotion
@@ -67,33 +67,32 @@ private enum WeatherLayer: Equatable {
 }
 
 private struct WeatherAtmosphereLayer: View {
-    let mood: PetWeatherMood
+    let profile: WeatherSceneProfile
     let layer: WeatherLayer
     let pointerOffset: CGSize
     let reduceMotion: Bool
-    private let profile: WeatherSceneProfile
     private let particleSeeds: [WeatherParticleSeed]
 
     init(
-        mood: PetWeatherMood,
+        profile: WeatherSceneProfile,
         layer: WeatherLayer,
         pointerOffset: CGSize,
         reduceMotion: Bool
     ) {
-        self.mood = mood
+        self.profile = profile
         self.layer = layer
         self.pointerOffset = pointerOffset
         self.reduceMotion = reduceMotion
 
-        let profile = WeatherSceneProfile(mood: mood)
-        self.profile = profile
         self.particleSeeds = WeatherParticleField.makeSeeds(
-            mood: mood,
+            mood: profile.mood,
             profile: profile,
             depth: layer.depth,
             reduceMotion: reduceMotion
         )
     }
+
+    private var mood: PetWeatherMood { profile.mood }
 
     private var requiresTimeline: Bool {
         if !particleSeeds.isEmpty { return true }
@@ -136,6 +135,7 @@ private struct WeatherAtmosphereLayer: View {
     @ViewBuilder
     private func atmosphere(time: TimeInterval, moving: Bool) -> some View {
         ZStack {
+            nightAmbient
             atmosphereBase(time: time, moving: moving)
 
             WeatherParticleField(
@@ -152,6 +152,28 @@ private struct WeatherAtmosphereLayer: View {
         }
         .frame(width: 220, height: 218)
         .clipped()
+    }
+
+    @ViewBuilder
+    private var nightAmbient: some View {
+        if layer == .background, !profile.isDaylight, mood != .cozy {
+            RoundedRectangle(cornerRadius: 38, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.05, green: 0.08, blue: 0.16)
+                                .opacity(0.18),
+                            Color(red: 0.12, green: 0.18, blue: 0.28)
+                                .opacity(0.07),
+                            .clear,
+                        ],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: 190, height: 188)
+                .blur(radius: 3)
+        }
     }
 
     @ViewBuilder
@@ -179,7 +201,9 @@ private struct WeatherAtmosphereLayer: View {
 
     @ViewBuilder
     private func sunnyAtmosphere(time: TimeInterval, moving: Bool) -> some View {
-        if layer == .background {
+        if !profile.isDaylight {
+            clearNightAtmosphere(time: time, moving: moving)
+        } else if layer == .background {
             Canvas { context, size in
                 let rayGradient = Gradient(
                     colors: [Color.yellow.opacity(0.16), .clear]
@@ -225,6 +249,76 @@ private struct WeatherAtmosphereLayer: View {
                 }
             }
                 .scaleEffect(moving ? 1 + sin(time * 0.75) * 0.025 : 1)
+        }
+    }
+
+    @ViewBuilder
+    private func clearNightAtmosphere(
+        time: TimeInterval,
+        moving: Bool
+    ) -> some View {
+        if layer == .background {
+            Canvas { context, size in
+                let moonCenter = CGPoint(
+                    x: size.width * 0.80,
+                    y: size.height * 0.16
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(
+                        x: moonCenter.x - 46,
+                        y: moonCenter.y - 46,
+                        width: 92,
+                        height: 92
+                    )),
+                    with: .radialGradient(
+                        Gradient(colors: [
+                            Color(red: 0.76, green: 0.86, blue: 1)
+                                .opacity(0.13),
+                            Color(red: 0.40, green: 0.56, blue: 0.82)
+                                .opacity(0.035),
+                            .clear,
+                        ]),
+                        center: moonCenter,
+                        startRadius: 3,
+                        endRadius: 46
+                    )
+                )
+                context.fill(
+                    Path(ellipseIn: CGRect(
+                        x: moonCenter.x - 8,
+                        y: moonCenter.y - 8,
+                        width: 16,
+                        height: 16
+                    )),
+                    with: .color(
+                        Color(red: 0.86, green: 0.92, blue: 1)
+                            .opacity(0.48)
+                    )
+                )
+
+                let stars: [(Double, Double, Double)] = [
+                    (0.16, 0.15, 0.0),
+                    (0.31, 0.29, 0.8),
+                    (0.47, 0.11, 1.5),
+                    (0.61, 0.25, 2.1),
+                    (0.86, 0.36, 2.8),
+                    (0.23, 0.43, 3.4),
+                ]
+                for star in stars {
+                    let twinkle = moving
+                        ? 0.58 + sin(time * 0.9 + star.2) * 0.18
+                        : 0.58
+                    context.fill(
+                        Path(ellipseIn: CGRect(
+                            x: size.width * star.0 - 1,
+                            y: size.height * star.1 - 1,
+                            width: 2,
+                            height: 2
+                        )),
+                        with: .color(Color.white.opacity(twinkle))
+                    )
+                }
+            }
         }
     }
 
@@ -329,7 +423,10 @@ private struct WeatherAtmosphereLayer: View {
         Canvas { context, size in
             switch layer {
             case .background:
-                let tintOpacity = stormy ? 0.105 : 0.06
+                let precipitationScale = 0.72
+                    + profile.precipitationIntensity * 0.44
+                let tintOpacity = (stormy ? 0.105 : 0.06)
+                    * precipitationScale
                 context.fill(
                     Path(
                         roundedRect: CGRect(
@@ -591,6 +688,7 @@ private struct WeatherAtmosphereLayer: View {
         opacity: Double,
         highlightOpacity: Double = 0
     ) {
+        let densityScale = 0.46 + profile.cloudDensity * 0.76
         let lobes: [(CGFloat, CGFloat, CGFloat)] = [
             (-32, 4, 24),
             (-13, -8, 31),
@@ -611,7 +709,7 @@ private struct WeatherAtmosphereLayer: View {
                 Path(ellipseIn: rect),
                 with: .color(
                     Color(red: 0.46, green: 0.53, blue: 0.62)
-                        .opacity(opacity)
+                        .opacity(opacity * densityScale)
                 )
             )
         }
@@ -629,7 +727,7 @@ private struct WeatherAtmosphereLayer: View {
                 Path(ellipseIn: rect),
                 with: .color(
                     Color(red: 0.80, green: 0.84, blue: 0.89)
-                        .opacity(highlightOpacity)
+                        .opacity(highlightOpacity * densityScale)
                 )
             )
         }
@@ -680,7 +778,7 @@ private struct WeatherAtmosphereLayer: View {
                 y: size.height * 0.42,
                 period: 17,
                 amplitude: 9,
-                opacity: 0.10,
+                opacity: 0.10 * fogOpacityScale,
                 blur: 9
             )
         case .midground:
@@ -688,7 +786,7 @@ private struct WeatherAtmosphereLayer: View {
                 y: size.height * 0.58,
                 period: 23,
                 amplitude: -12,
-                opacity: 0.13,
+                opacity: 0.13 * fogOpacityScale,
                 blur: 7
             )
         case .foreground:
@@ -696,10 +794,14 @@ private struct WeatherAtmosphereLayer: View {
                 y: size.height * 0.72,
                 period: 31,
                 amplitude: 15,
-                opacity: 0.17,
+                opacity: 0.17 * fogOpacityScale,
                 blur: 5
             )
         }
+    }
+
+    private var fogOpacityScale: Double {
+        0.48 + profile.fogDensity * 0.92
     }
 
     /// Bolt silhouettes in unit-fraction coordinates of the weather canvas.

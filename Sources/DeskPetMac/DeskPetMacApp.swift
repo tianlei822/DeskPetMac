@@ -22,6 +22,8 @@ struct DeskPetMacApp: App {
                     .keyboardShortcut("p", modifiers: [.command])
                 Button("Dance") { model.dance() }
                     .keyboardShortcut("d", modifiers: [.command])
+                Button("Give Treat") { model.giveTreat() }
+                    .keyboardShortcut("t", modifiers: [.command])
                 Button("Use Cat") { model.selectPetKind(.cat) }
                     .keyboardShortcut("1", modifiers: [.command])
                 Button("Use Pauli") { model.selectPetKind(.pauli) }

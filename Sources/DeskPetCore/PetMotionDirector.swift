@@ -217,25 +217,49 @@ public enum PetMotionDirector {
         time: Double,
         seed: Int,
         isEligible: Bool,
-        reduceMotion: Bool
+        reduceMotion: Bool,
+        autonomyState: PetAutonomyState? = nil
     ) -> PetMotionFrame {
         guard isEligible, !reduceMotion, time.isFinite else { return .idle }
 
-        let cadence = cadence(for: pet, seed: seed)
+        let baseCadence = cadence(for: pet, seed: seed)
+        let cadence = if let autonomyState {
+            PetMotionCadence(
+                idleDuration: PetAutonomyDirector.idleDuration(
+                    base: baseCadence.idleDuration,
+                    state: autonomyState
+                ),
+                stepsPerSecond: baseCadence.stepsPerSecond,
+                artworkFramesPerSecond: baseCadence.artworkFramesPerSecond,
+                verticalAmplitude: baseCadence.verticalAmplitude,
+                horizontalAmplitude: baseCadence.horizontalAmplitude
+            )
+        } else {
+            baseCadence
+        }
         let cycleDuration = cadence.idleDuration + eventWindowDuration
         let normalizedTime = euclideanModulo(time, modulus: cycleDuration)
         guard normalizedTime >= cadence.idleDuration else { return .idle }
 
         let cycleIndex = boundedCycleIndex(for: time, cycleDuration: cycleDuration)
         let eventHash = positiveHash(seed ^ cycleIndex, salt: pet.hashSalt + 101)
-        let event: PetMotionEvent = switch eventHash % 11 {
-        case 0: .idleAction1
-        case 1: .idleAction2
-        case 2: .lookAround
-        case 3: .stretch
-        case 4: .perkUp
-        case 5, 6, 7, 8, 9, 10: .walk
-        default: .idle
+        let event: PetMotionEvent
+        if let autonomyState {
+            event = PetAutonomyDirector.event(
+                for: pet,
+                state: autonomyState,
+                roll: eventHash
+            )
+        } else {
+            event = switch eventHash % 11 {
+            case 0: .idleAction1
+            case 1: .idleAction2
+            case 2: .lookAround
+            case 3: .stretch
+            case 4: .perkUp
+            case 5, 6, 7, 8, 9, 10: .walk
+            default: .idle
+            }
         }
         let elapsed = normalizedTime - cadence.idleDuration
 
@@ -350,8 +374,8 @@ public enum PetMotionDirector {
             artworkBlend: nextFrameIndex == nil ? 0 : artworkBlend,
             artworkOpacity: artworkTransitionOpacity(
                 progress: progress,
-                fadeInFraction: 0.06,
-                fadeOutFraction: 0.08
+                fadeInFraction: 0.074,
+                fadeOutFraction: 0.11
             ),
             stepCount: stepCount,
             eventProgress: progress,
@@ -509,8 +533,8 @@ public enum PetMotionDirector {
     private static func gestureArtworkOpacity(progress: Double) -> Double {
         artworkTransitionOpacity(
             progress: progress,
-            fadeInFraction: 0.14,
-            fadeOutFraction: 0.18
+            fadeInFraction: 0.20,
+            fadeOutFraction: 0.22
         )
     }
 
