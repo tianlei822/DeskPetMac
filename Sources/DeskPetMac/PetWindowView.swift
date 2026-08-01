@@ -30,7 +30,7 @@ struct PetWindowView: View {
                 Spacer(minLength: 38)
                 ZStack {
                     WeatherBackdrop(
-                        mood: displayedMood,
+                        profile: displayedWeatherProfile,
                         pointerOffset: pointerOffset,
                         reduceMotion: reduceMotion
                     )
@@ -40,7 +40,7 @@ struct PetWindowView: View {
                         .accessibilityHidden(true)
 
                     WeatherMidground(
-                        mood: displayedMood,
+                        profile: displayedWeatherProfile,
                         pointerOffset: pointerOffset,
                         reduceMotion: reduceMotion
                     )
@@ -63,7 +63,7 @@ struct PetWindowView: View {
                             if PetArtworkLoader.hasBaseArtwork(for: model.petKind) {
                                 RealisticPetBody(
                                     kind: model.petKind,
-                                    mood: displayedMood,
+                                    weatherProfile: displayedWeatherProfile,
                                     isHovering: hover,
                                     pulse: model.affectionPulse,
                                     comboCount: model.comboCount,
@@ -72,6 +72,7 @@ struct PetWindowView: View {
                                     isNuzzling: model.isNuzzling,
                                     personalityPose: model.activePersonalityMoment?.pose,
                                     pointerOffset: pointerOffset,
+                                    autonomyState: model.autonomyState,
                                     reduceMotion: reduceMotion,
                                     motionPreview: motionPreview,
                                     dragLeanAt: { time in model.dragLean(at: time) },
@@ -116,7 +117,7 @@ struct PetWindowView: View {
                     )
 
                     WeatherForeground(
-                        mood: displayedMood,
+                        profile: displayedWeatherProfile,
                         pointerOffset: pointerOffset,
                         reduceMotion: reduceMotion
                     )
@@ -131,7 +132,7 @@ struct PetWindowView: View {
                 )
                 .animation(
                     .easeInOut(
-                        duration: WeatherSceneProfile(mood: displayedMood).transitionDuration
+                        duration: displayedWeatherProfile.transitionDuration
                     ),
                     value: displayedMood
                 )
@@ -153,6 +154,15 @@ struct PetWindowView: View {
                 .allowsHitTesting(false)
                 .offset(y: 92)
 
+            TreatParticleOverlay(
+                burst: model.treatBurst,
+                kind: model.petKind,
+                reduceMotion: reduceMotion
+            )
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+                .offset(y: 76)
+
             bubbleOverlay
                 .padding(.top, 6)
         }
@@ -171,6 +181,7 @@ struct PetWindowView: View {
         .contextMenu {
             Button("Pat") { model.pat() }
             Button("Dance") { model.dance() }
+            Button("Give Treat") { model.giveTreat() }
             Divider()
             Button("Refresh Weather") {
                 Task { await model.refreshWeather() }
@@ -220,6 +231,15 @@ struct PetWindowView: View {
            let preview = PetWeatherMood(rawValue: rawValue) { return preview }
         #endif
         return model.mood
+    }
+
+    private var displayedWeatherProfile: WeatherSceneProfile {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["DESKPET_WEATHER_PREVIEW"] != nil {
+            return WeatherSceneProfile(mood: displayedMood)
+        }
+        #endif
+        return WeatherSceneProfile(snapshot: model.weather)
     }
 
     private var motionPreview: PetMotionEvent? {
@@ -310,6 +330,11 @@ private struct StatusBubble: View {
                     .progressViewStyle(.linear)
                     .tint(.pink)
                     .frame(width: 86)
+                Text(model.autonomyState.dominantDrive.activityLabel)
+                    .font(.system(size: 8, weight: .medium, design: .rounded))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .frame(width: 86, alignment: .leading)
             }
 
             Divider()
@@ -318,10 +343,11 @@ private struct StatusBubble: View {
             VStack(alignment: .trailing, spacing: 3) {
                 Text(mood.displayName)
                     .font(.system(size: 11, weight: .semibold, design: .rounded))
-                Text(model.weather.temperatureLabel)
-                    .font(.system(size: 10, weight: .medium, design: .rounded))
+                Text(model.weatherTemperatureSummary)
+                    .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.secondary)
-                Text(model.weather.locationName)
+                    .lineLimit(1)
+                Text(model.weatherAtmosphereSummary)
                     .font(.system(size: 9, weight: .medium, design: .rounded))
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
@@ -337,7 +363,7 @@ private struct StatusBubble: View {
         .shadow(color: .black.opacity(0.10), radius: 7, y: 3)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
-            "\(model.bondTitle). \(mood.displayName) \(model.weather.temperatureLabel) in \(model.weather.locationName)"
+            "\(model.bondTitle). \(model.autonomyState.dominantDrive.activityLabel). \(mood.displayName) \(model.weatherTemperatureSummary), \(model.weatherAtmosphereSummary), in \(model.weather.locationName)"
         )
     }
 }
@@ -389,6 +415,15 @@ private struct ControlStrip: View {
             }
             .help("Make the pet dance")
             .buttonStyle(PetIconButtonStyle(tint: .purple, isActive: model.isDancing))
+
+            Button {
+                model.giveTreat()
+            } label: {
+                Image(systemName: "gift.fill")
+            }
+            .help("Give \(model.petKind.displayName) a treat")
+            .accessibilityLabel("Give \(model.petKind.displayName) a treat")
+            .buttonStyle(PetIconButtonStyle(tint: .mint, isActive: false))
 
             Button {
                 model.toggleSettings()
@@ -1506,6 +1541,90 @@ private struct Heart: Identifiable {
     let drift: CGFloat
     let size: CGFloat
     let color: Color
+}
+
+private struct TreatParticle: Identifiable {
+    let id: Int
+    let x: CGFloat
+    let rotation: Double
+    let delay: Double
+}
+
+private struct TreatParticleOverlay: View {
+    let burst: Int
+    let kind: PetKind
+    let reduceMotion: Bool
+    @State private var particles: [TreatParticle] = []
+    @State private var nextID = 0
+
+    var body: some View {
+        ZStack {
+            ForEach(particles) { particle in
+                FallingTreat(
+                    particle: particle,
+                    symbol: symbol,
+                    reduceMotion: reduceMotion
+                )
+            }
+        }
+        .frame(width: 180, height: 160)
+        .onChange(of: burst) { _, _ in spawn() }
+    }
+
+    private var symbol: String {
+        switch kind {
+        case .cat: "🐟"
+        case .pauli: "⚡️"
+        case .dog: "🦴"
+        }
+    }
+
+    private func spawn() {
+        let batch = (0..<3).map { index in
+            let particle = TreatParticle(
+                id: nextID + index,
+                x: CGFloat(index - 1) * 25 + CGFloat.random(in: -5...5),
+                rotation: Double.random(in: -18...18),
+                delay: Double(index) * 0.08
+            )
+            return particle
+        }
+        nextID += batch.count
+        let ids = Set(batch.map(\.id))
+        particles.append(contentsOf: batch)
+
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(reduceMotion ? 0.35 : 1.35))
+            particles.removeAll { ids.contains($0.id) }
+        }
+    }
+}
+
+private struct FallingTreat: View {
+    let particle: TreatParticle
+    let symbol: String
+    let reduceMotion: Bool
+    @State private var arrived = false
+
+    var body: some View {
+        Text(symbol)
+            .font(.system(size: 22))
+            .offset(
+                x: particle.x,
+                y: reduceMotion ? -8 : arrived ? 42 : -62
+            )
+            .rotationEffect(.degrees(reduceMotion ? 0 : arrived ? particle.rotation : 0))
+            .scaleEffect(arrived ? 0.72 : 1.08)
+            .opacity(arrived ? 0 : 1)
+            .onAppear {
+                withAnimation(
+                    .easeIn(duration: reduceMotion ? 0.18 : 0.92)
+                        .delay(reduceMotion ? 0 : particle.delay)
+                ) {
+                    arrived = true
+                }
+            }
+    }
 }
 
 private struct HeartParticleOverlay: View {

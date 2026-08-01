@@ -12,6 +12,7 @@ public enum PersonalityMomentCategory: String, CaseIterable, Equatable, Sendable
     case weather
     case focus
     case interaction
+    case treat
 }
 
 public struct PersonalityMoment: Identifiable, Equatable, Sendable {
@@ -49,7 +50,7 @@ public struct PersonalityMoment: Identifiable, Equatable, Sendable {
 
         if let requestedCategory = context.requestedCategory {
             guard category == requestedCategory else { return false }
-        } else if category == .interaction {
+        } else if category == .interaction || category == .treat {
             return false
         }
 
@@ -58,7 +59,7 @@ public struct PersonalityMoment: Identifiable, Equatable, Sendable {
             return moods.contains(context.mood)
         case .focus:
             return context.workProgress >= (minimumWorkProgress ?? 0)
-        case .general, .interaction:
+        case .general, .interaction, .treat:
             return true
         }
     }
@@ -220,6 +221,27 @@ public enum PersonalityMomentCatalog {
             line: "That pat was almost professional."
         ),
         .init(
+            id: "cat.treat.tribute",
+            petKind: .cat,
+            category: .treat,
+            pose: .proud,
+            line: "A tribute. Sensible."
+        ),
+        .init(
+            id: "cat.treat.fish-inspection",
+            petKind: .cat,
+            category: .treat,
+            pose: .peek,
+            line: "Fish inspection complete. Approved."
+        ),
+        .init(
+            id: "cat.treat.another",
+            petKind: .cat,
+            category: .treat,
+            pose: .perk,
+            line: "I may permit another later."
+        ),
+        .init(
             id: "pauli.general.cursor-patrol",
             petKind: .pauli,
             category: .general,
@@ -319,6 +341,27 @@ public enum PersonalityMomentCatalog {
             line: "Again? Excellent testing protocol."
         ),
         .init(
+            id: "pauli.treat.energy-capsule",
+            petKind: .pauli,
+            category: .treat,
+            pose: .perk,
+            line: "Energy capsule acquired!"
+        ),
+        .init(
+            id: "pauli.treat.snack-protocol",
+            petKind: .pauli,
+            category: .treat,
+            pose: .proud,
+            line: "Snack protocol: extremely successful."
+        ),
+        .init(
+            id: "pauli.treat.battery-happy",
+            petKind: .pauli,
+            category: .treat,
+            pose: .stretch,
+            line: "Battery reports: very happy."
+        ),
+        .init(
             id: "dog.general.adventure",
             petKind: .dog,
             category: .general,
@@ -416,6 +459,27 @@ public enum PersonalityMomentCatalog {
             category: .interaction,
             pose: .stretch,
             line: "Teamwork! You pat, I wag."
+        ),
+        .init(
+            id: "dog.treat.best-day",
+            petKind: .dog,
+            category: .treat,
+            pose: .perk,
+            line: "A treat! This is the best day!"
+        ),
+        .init(
+            id: "dog.treat.caught-it",
+            petKind: .dog,
+            category: .treat,
+            pose: .proud,
+            line: "Caught it! Tail celebration engaged!"
+        ),
+        .init(
+            id: "dog.treat.more-teamwork",
+            petKind: .dog,
+            category: .treat,
+            pose: .stretch,
+            line: "Delicious teamwork. Again sometime?"
         )
     ]
 }

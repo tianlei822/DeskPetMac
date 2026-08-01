@@ -77,17 +77,20 @@ public struct WeatherSnapshot: Equatable, Sendable {
     public let temperatureCelsius: Double?
     public let locationName: String
     public let observedAt: Date
+    public let details: WeatherDetails
 
     public init(
         conditionCode: Int?,
         temperatureCelsius: Double?,
         locationName: String,
-        observedAt: Date = Date()
+        observedAt: Date = Date(),
+        details: WeatherDetails = .unknown
     ) {
         self.conditionCode = conditionCode
         self.temperatureCelsius = temperatureCelsius
         self.locationName = locationName
         self.observedAt = observedAt
+        self.details = details
     }
 
     public var mood: PetWeatherMood {
@@ -104,6 +107,48 @@ public struct WeatherSnapshot: Equatable, Sendable {
         temperatureCelsius: nil,
         locationName: "Local"
     )
+}
+
+public struct WeatherDetails: Equatable, Sendable {
+    public let apparentTemperatureCelsius: Double?
+    public let relativeHumidityPercent: Double?
+    public let precipitationMillimeters: Double?
+    public let rainMillimeters: Double?
+    public let snowfallCentimeters: Double?
+    public let cloudCoverPercent: Double?
+    public let windSpeedKilometersPerHour: Double?
+    public let windDirectionDegrees: Double?
+    public let windGustKilometersPerHour: Double?
+    public let visibilityMeters: Double?
+    public let isDay: Bool?
+
+    public init(
+        apparentTemperatureCelsius: Double? = nil,
+        relativeHumidityPercent: Double? = nil,
+        precipitationMillimeters: Double? = nil,
+        rainMillimeters: Double? = nil,
+        snowfallCentimeters: Double? = nil,
+        cloudCoverPercent: Double? = nil,
+        windSpeedKilometersPerHour: Double? = nil,
+        windDirectionDegrees: Double? = nil,
+        windGustKilometersPerHour: Double? = nil,
+        visibilityMeters: Double? = nil,
+        isDay: Bool? = nil
+    ) {
+        self.apparentTemperatureCelsius = apparentTemperatureCelsius
+        self.relativeHumidityPercent = relativeHumidityPercent
+        self.precipitationMillimeters = precipitationMillimeters
+        self.rainMillimeters = rainMillimeters
+        self.snowfallCentimeters = snowfallCentimeters
+        self.cloudCoverPercent = cloudCoverPercent
+        self.windSpeedKilometersPerHour = windSpeedKilometersPerHour
+        self.windDirectionDegrees = windDirectionDegrees
+        self.windGustKilometersPerHour = windGustKilometersPerHour
+        self.visibilityMeters = visibilityMeters
+        self.isDay = isDay
+    }
+
+    public static let unknown = WeatherDetails()
 }
 
 public struct WorkSessionState: Equatable, Codable, Sendable {

@@ -35,7 +35,7 @@ struct WeatherSceneProfileTests {
             #expect(profile.foreground.count >= 0)
             #expect(profile.totalParticleCount <= 40)
             #expect(profile.transitionDuration == 0.8)
-            #expect(profile.maximumFramesPerSecond == 60)
+            #expect((24...30).contains(profile.maximumFramesPerSecond))
         }
     }
 
@@ -1864,8 +1864,8 @@ struct PersonalityMomentTests {
     @Test("dog moments are enthusiastic and stay dog-specific")
     func dogMomentsStayDogSpecific() {
         let dogMoments = PersonalityMomentCatalog.all.filter { $0.petKind == .dog }
-        #expect(dogMoments.count == 12)
-        #expect(Set(dogMoments.map(\.id)).count == 12)
+        #expect(dogMoments.count == 15)
+        #expect(Set(dogMoments.map(\.id)).count == 15)
         for category in PersonalityMomentCategory.allCases {
             #expect(dogMoments.filter { $0.category == category }.count == 3)
         }
@@ -1886,15 +1886,15 @@ struct PersonalityMomentTests {
         #expect(selected?.category == .interaction)
     }
 
-    @Test("catalog contains twelve unique moments for each pet and three per category")
+    @Test("catalog contains fifteen unique moments for each pet and three per category")
     func catalogShape() {
         let moments = PersonalityMomentCatalog.all
 
         for pet in PetKind.allCases {
             let petMoments = moments.filter { $0.petKind == pet }
 
-            #expect(petMoments.count == 12)
-            #expect(Set(petMoments.map(\.id)).count == 12)
+            #expect(petMoments.count == 15)
+            #expect(Set(petMoments.map(\.id)).count == 15)
             for category in PersonalityMomentCategory.allCases {
                 #expect(petMoments.filter { $0.category == category }.count == 3)
             }
@@ -1970,6 +1970,28 @@ struct PersonalityMomentTests {
 
         #expect(selected?.petKind == .pauli)
         #expect(selected?.category == .interaction)
+    }
+
+    @Test("treat requests select a playful pet-specific response")
+    func treatSelection() {
+        for pet in PetKind.allCases {
+            let context = PersonalityMomentContext(
+                petKind: pet,
+                mood: .cozy,
+                workProgress: 0,
+                requestedCategory: .treat,
+                isPresentationBlocked: false
+            )
+            let selected = PersonalityMomentSelector.select(
+                from: PersonalityMomentCatalog.all,
+                context: context,
+                excluding: [],
+                roll: 1
+            )
+
+            #expect(selected?.petKind == pet)
+            #expect(selected?.category == .treat)
+        }
     }
 
     @Test("weather and focus moments require matching context")

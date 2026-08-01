@@ -190,7 +190,13 @@ struct WeatherParticleField: View {
         let diameter = CGFloat(interpolate(depthProfile.size, unit: particle.sizeUnit))
         let opacity = interpolate(depthProfile.opacity, unit: particle.opacityUnit)
         let blur = CGFloat(interpolate(depthProfile.blur, unit: particle.blurUnit))
-        let color = mood == .sunny ? Color.yellow : Color.orange
+        let color = if mood == .sunny, !profile.isDaylight {
+            Color(red: 0.72, green: 0.84, blue: 1)
+        } else if mood == .sunny {
+            Color.yellow
+        } else {
+            Color.orange
+        }
         context.addFilter(.blur(radius: blur))
         context.fill(
             Path(
@@ -227,7 +233,11 @@ struct WeatherParticleField: View {
             lightContext.addFilter(.blur(radius: 9))
             lightContext.fill(
                 Path(ellipseIn: rect),
-                with: .color(Color.blue.opacity(0.12))
+                with: .color(
+                    Color.blue.opacity(
+                        0.08 + profile.precipitationIntensity * 0.08
+                    )
+                )
             )
 
             lightContext.fill(
@@ -239,7 +249,11 @@ struct WeatherParticleField: View {
                         height: 10
                     )
                 ),
-                with: .color(Color.white.opacity(0.08))
+                with: .color(
+                    Color.white.opacity(
+                        0.05 + profile.precipitationIntensity * 0.06
+                    )
+                )
             )
         }
     }
@@ -255,13 +269,16 @@ struct WeatherParticleField: View {
             height: 28
         )
         let shimmer = moving ? 0.85 + sin(time * 2.1) * 0.15 : 1
+        let intensity = 0.62 + profile.precipitationIntensity * 0.72
         context.addFilter(.blur(radius: 7))
         context.fill(
             Path(ellipseIn: rect),
             with: .linearGradient(
                 Gradient(colors: [
-                    Color(red: 0.36, green: 0.68, blue: 0.88).opacity(0.03 * shimmer),
-                    Color(red: 0.54, green: 0.78, blue: 0.94).opacity(0.12 * shimmer),
+                    Color(red: 0.36, green: 0.68, blue: 0.88)
+                        .opacity(0.03 * shimmer * intensity),
+                    Color(red: 0.54, green: 0.78, blue: 0.94)
+                        .opacity(0.12 * shimmer * intensity),
                     .clear,
                 ]),
                 startPoint: CGPoint(x: rect.minX, y: rect.midY),
@@ -274,7 +291,11 @@ struct WeatherParticleField: View {
         in context: inout GraphicsContext,
         size: CGSize
     ) {
-        for index in 0..<5 {
+        let splashCount = max(
+            2,
+            min(7, Int((2 + profile.precipitationIntensity * 5).rounded()))
+        )
+        for index in 0..<splashCount {
             let period = 1.7 + Double((index * 37 + 11) % 7) * 0.23
             let jitterX = CGFloat((index * 53 + 7) % 11) - 5
             let phase = splashPhase(offset: Double(index) * 0.19, period: period)
@@ -289,7 +310,10 @@ struct WeatherParticleField: View {
             context.stroke(
                 Path(ellipseIn: rect),
                 with: .color(
-                    Color.blue.opacity(0.22 * Double(1 - phase))
+                    Color.blue.opacity(
+                        (0.12 + profile.precipitationIntensity * 0.15)
+                            * Double(1 - phase)
+                    )
                 ),
                 lineWidth: 1
             )
@@ -327,7 +351,10 @@ struct WeatherParticleField: View {
 
     private func animatedWind(for particle: WeatherParticleSeed) -> Double {
         guard moving else { return profile.wind }
-        let gust = 0.84 + sin(time * 0.72 + particle.phase * .pi * 2) * 0.16
+        let gustAmplitude = 0.06 + profile.gustStrength * 0.18
+        let gust = 1 + sin(
+            time * 0.72 + particle.phase * .pi * 2
+        ) * gustAmplitude
         return profile.wind * gust
     }
 

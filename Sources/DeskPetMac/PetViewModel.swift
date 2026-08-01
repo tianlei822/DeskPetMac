@@ -16,8 +16,10 @@ final class PetViewModel: ObservableObject {
     @Published private(set) var isDancing = false
     @Published private(set) var comboCount = 0
     @Published private(set) var heartBurst = 0
+    @Published private(set) var treatBurst = 0
     @Published private(set) var activePersonalityMoment: PersonalityMoment?
     @Published private(set) var isNuzzling = false
+    @Published private(set) var autonomyState = PetAutonomyState.neutral
     @Published var isPetPickerVisible = false
     @Published var isSettingsVisible = false
     @Published var reminderMinutes = 60.0 {
@@ -40,9 +42,11 @@ final class PetViewModel: ObservableObject {
     private var personalityScheduleTask: Task<Void, Never>?
     private var personalityDismissTask: Task<Void, Never>?
     private var nuzzleTask: Task<Void, Never>?
+    private var autonomyTask: Task<Void, Never>?
     private var recentPersonalityMomentIDs: [String] = []
     private var statusRevealToken = 0
     private var lastPatAt: Date?
+    private var lastInteractionAt = Date()
     private var dragLeanTracker = DragLeanTracker()
     private let cursorTracker = CursorTracker()
     private var windowMoveObserver: NSObjectProtocol?
@@ -59,6 +63,7 @@ final class PetViewModel: ObservableObject {
 
     init() {
         loadPersistedState()
+        refreshAutonomyState()
     }
 
     var mood: PetWeatherMood {
@@ -79,6 +84,20 @@ final class PetViewModel: ObservableObject {
 
     var bondProgress: Double { bond.levelProgress }
 
+    var weatherTemperatureSummary: String {
+        guard let apparent = weather.details.apparentTemperatureCelsius,
+              apparent.isFinite else { return weather.temperatureLabel }
+        return "\(weather.temperatureLabel) · feels \(Int(apparent.rounded()))C"
+    }
+
+    var weatherAtmosphereSummary: String {
+        if let wind = weather.details.windSpeedKilometersPerHour,
+           wind.isFinite {
+            return "Wind \(Int(max(0, wind).rounded())) km/h"
+        }
+        return weather.locationName
+    }
+
     func start() async {
         guard startupGate.claim() else { return }
         await notifications.requestAuthorization()
@@ -87,6 +106,7 @@ final class PetViewModel: ObservableObject {
         startSleepMonitor()
         startWeatherLoop()
         startPersonalitySchedule()
+        startAutonomyLoop()
         startInteractionTracking()
         await refreshWeather()
     }
@@ -96,6 +116,7 @@ final class PetViewModel: ObservableObject {
         isRefreshingWeather = true
         defer {
             isRefreshingWeather = false
+            refreshAutonomyState()
             revealStatusBriefly()
         }
 
@@ -117,6 +138,7 @@ final class PetViewModel: ObservableObject {
 
     func pat() {
         wake()
+        noteInteraction()
         let shouldShowInteractionResponse = activePersonalityMoment != nil
         let now = Date()
         if let last = lastPatAt, now.timeIntervalSince(last) <= comboWindow {
@@ -142,6 +164,7 @@ final class PetViewModel: ObservableObject {
 
     func dance() {
         wake()
+        noteInteraction()
         clearPersonalityMoment()
         bond.registerPlay()
         persistBond()
@@ -161,6 +184,7 @@ final class PetViewModel: ObservableObject {
     func beginNuzzle() {
         wake()
         guard !isNuzzling, !isDancing else { return }
+        noteInteraction()
         clearPersonalityMoment()
         isNuzzling = true
         isReminderVisible = false
@@ -189,6 +213,7 @@ final class PetViewModel: ObservableObject {
     /// A quiet "you noticed me" moment: one small heart and a play point,
     /// triggered when the pointer lingers on the pet.
     func delight() {
+        noteInteraction()
         heartBurst += 1
         bond.registerPlay(points: 1)
         persistBond()
@@ -203,6 +228,7 @@ final class PetViewModel: ObservableObject {
     }
 
     func takeBreak() {
+        noteInteraction()
         clearPersonalityMoment()
         let policy = currentReminderPolicy()
         breakState = policy.markBreakTaken(state: breakState)
@@ -224,6 +250,7 @@ final class PetViewModel: ObservableObject {
     }
 
     func selectPetKind(_ kind: PetKind) {
+        noteInteraction()
         clearPersonalityMoment()
         guard petKind != kind else {
             isPetPickerVisible = false
@@ -232,9 +259,27 @@ final class PetViewModel: ObservableObject {
         }
         petKind = kind
         defaults.set(kind.rawValue, forKey: StoreKey.petKind)
+        refreshAutonomyState()
         isPetPickerVisible = false
         affectionPulse += 1
         revealStatusBriefly()
+    }
+
+    func giveTreat() {
+        wake()
+        noteInteraction()
+        clearPersonalityMoment()
+        isReminderVisible = false
+        isStatusVisible = false
+        isPetPickerVisible = false
+        isSettingsVisible = false
+
+        bond.registerPlay(points: 2)
+        persistBond()
+        refreshAutonomyState()
+        heartBurst += 1
+        treatBurst += 1
+        _ = presentPersonalityMoment(category: .treat)
     }
 
     private func wake() {
@@ -304,6 +349,17 @@ final class PetViewModel: ObservableObject {
         }
     }
 
+    private func startAutonomyLoop() {
+        autonomyTask?.cancel()
+        autonomyTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(45))
+                guard !Task.isCancelled else { return }
+                self?.refreshAutonomyState()
+            }
+        }
+    }
+
     private func startInteractionTracking() {
         guard windowMoveObserver == nil else { return }
         windowMoveObserver = NotificationCenter.default.addObserver(
@@ -359,7 +415,7 @@ final class PetViewModel: ObservableObject {
             roll: roll
         )
 
-        if moment == nil, category == .interaction {
+        if moment == nil, category == .interaction || category == .treat {
             moment = PersonalityMomentSelector.select(
                 from: PersonalityMomentCatalog.all,
                 context: context,
@@ -408,6 +464,7 @@ final class PetViewModel: ObservableObject {
         }
 
         breakState = candidate
+        refreshAutonomyState()
     }
 
     private func currentReminderPolicy() -> BreakReminderPolicy {
@@ -432,6 +489,25 @@ final class PetViewModel: ObservableObject {
         if let data = try? JSONEncoder().encode(bond) {
             defaults.set(data, forKey: StoreKey.bond)
         }
+    }
+
+    private func noteInteraction(at date: Date = Date()) {
+        lastInteractionAt = date
+        refreshAutonomyState(now: date)
+    }
+
+    private func refreshAutonomyState(now: Date = Date()) {
+        autonomyState = PetAutonomyDirector.state(
+            pet: petKind,
+            hourOfDay: Calendar.current.component(.hour, from: now),
+            secondsSinceInteraction: max(
+                0,
+                now.timeIntervalSince(lastInteractionAt)
+            ),
+            workProgress: workProgress,
+            mood: mood,
+            bondProgress: bondProgress
+        )
     }
 
     private func revealStatusBriefly() {

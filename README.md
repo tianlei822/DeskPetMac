@@ -7,8 +7,10 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 ## Features
 
 - Transparent floating pet window, draggable by background.
+- **Context-aware autonomy / 情境自主行为** — energy, curiosity, social need, local time, weather, bond, and your current focus streak influence whether each pet explores, self-grooms, watches the weather, seeks attention, rests, or stretches with you.
 - **Character motion / 角色动作** — Cat, Pauli, and Dog occasionally take a few real animated steps and perform distinct idle actions, while pats, dance, sleep, hover, and personality poses keep priority.
-- **Depth-aware weather / 景深天气** — procedural clouds, fog, rain, snow, sunlight, splashes, wet reflections, and natural storm illumination animate around and across the pet without a weather label.
+- **Observation-driven weather / 实况天气** — real precipitation, cloud cover, humidity, visibility, wind, gusts, and day/night observations drive layered clouds, fog, rain, snow, moonlight, splashes, wet reflections, and storm illumination.
+- **Treat interaction / 投喂互动** — use the gift control or `Cmd+T` to toss each companion its favorite snack and receive a character-specific response.
 - **Pat combos** — rapid taps build from a soft bounce into a 5+ hit starburst celebration, with a longer-lived `×N` badge.
 - **Floating heart particles** burst out when you pat or make the pet dance.
 - **Bond / affection system** — pats and play grow affection through five levels (New Friend → Soulmate), with hearts and a progress bar in the status bubble. Bond, pet choice, and reminder interval all persist across launches.
@@ -26,7 +28,7 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 
 ## Shortcuts
 
-- `Cmd+P` pat · `Cmd+D` dance · `Cmd+B` take break · `Cmd+R` refresh weather · `Cmd+1`/`Cmd+2`/`Cmd+3` switch pet · `Cmd+Q` quit.
+- `Cmd+P` pat · `Cmd+D` dance · `Cmd+T` treat · `Cmd+B` take break · `Cmd+R` refresh weather · `Cmd+1`/`Cmd+2`/`Cmd+3` switch pet · `Cmd+Q` quit.
 
 ## Run
 
