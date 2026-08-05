@@ -27,6 +27,9 @@ public struct PetAutonomyState: Equatable, Sendable {
     public let focusPressure: Double
     public let weatherInterest: Double
     public let dominantDrive: PetAutonomyDrive
+    public let familiarity: Double
+    public let preferredInteraction: PetInteractionPreference?
+    public let rhythmAffinity: Double
 
     public init(
         energy: Double,
@@ -34,7 +37,10 @@ public struct PetAutonomyState: Equatable, Sendable {
         socialNeed: Double,
         focusPressure: Double,
         weatherInterest: Double,
-        dominantDrive: PetAutonomyDrive
+        dominantDrive: PetAutonomyDrive,
+        familiarity: Double = 0,
+        preferredInteraction: PetInteractionPreference? = nil,
+        rhythmAffinity: Double = 0
     ) {
         self.energy = Self.clampUnit(energy)
         self.curiosity = Self.clampUnit(curiosity)
@@ -42,6 +48,9 @@ public struct PetAutonomyState: Equatable, Sendable {
         self.focusPressure = Self.clampUnit(focusPressure)
         self.weatherInterest = Self.clampUnit(weatherInterest)
         self.dominantDrive = dominantDrive
+        self.familiarity = Self.clampUnit(familiarity)
+        self.preferredInteraction = preferredInteraction
+        self.rhythmAffinity = Self.clampUnit(rhythmAffinity)
     }
 
     public static let neutral = PetAutonomyState(
@@ -66,12 +75,17 @@ public enum PetAutonomyDirector {
         secondsSinceInteraction: Double,
         workProgress: Double,
         mood: PetWeatherMood,
-        bondProgress: Double
+        bondProgress: Double,
+        familiarity: Double = 0,
+        preferredInteraction: PetInteractionPreference? = nil,
+        rhythmAffinity: Double = 0
     ) -> PetAutonomyState {
         let hour = min(23, max(0, hourOfDay))
         let quietSeconds = safeNonnegative(secondsSinceInteraction)
         let focus = clampUnit(workProgress)
         let bond = clampUnit(bondProgress)
+        let familiarity = clampUnit(familiarity)
+        let rhythmAffinity = clampUnit(rhythmAffinity)
         let daylightPhase = sin(
             (Double(hour) - 6) / 16 * .pi
         )
@@ -81,7 +95,9 @@ public enum PetAutonomyDirector {
         case .rainy, .snowy, .cozy: 0.07
         case .sunny, .cloudy, .foggy: 0
         }
-        let energy = clampUnit(circadianEnergy - weatherEnergyPenalty)
+        let energy = clampUnit(
+            circadianEnergy - weatherEnergyPenalty + rhythmAffinity * 0.03
+        )
 
         let quietProgress = min(1, quietSeconds / (20 * 60))
         let socialBias: Double = switch pet {
@@ -91,6 +107,7 @@ public enum PetAutonomyDirector {
         }
         let socialNeed = clampUnit(
             0.10 + quietProgress * 0.72 + socialBias + bond * 0.08
+                + familiarity * 0.08 + rhythmAffinity * 0.10
         )
 
         let curiosityBias: Double = switch pet {
@@ -100,7 +117,7 @@ public enum PetAutonomyDirector {
         }
         let curiosity = clampUnit(
             0.30 + curiosityBias + energy * 0.18 + quietProgress * 0.16
-                - focus * 0.08
+                - focus * 0.08 + familiarity * 0.04
         )
         let weatherInterest: Double = switch mood {
         case .stormy: 0.96
@@ -133,7 +150,10 @@ public enum PetAutonomyDirector {
             socialNeed: socialNeed,
             focusPressure: focus,
             weatherInterest: weatherInterest,
-            dominantDrive: drive
+            dominantDrive: drive,
+            familiarity: familiarity,
+            preferredInteraction: preferredInteraction,
+            rhythmAffinity: rhythmAffinity
         )
     }
 
@@ -142,7 +162,7 @@ public enum PetAutonomyDirector {
         state: PetAutonomyState,
         roll: Int
     ) -> PetMotionEvent {
-        let events: [PetMotionEvent] = switch (pet, state.dominantDrive) {
+        var events: [PetMotionEvent] = switch (pet, state.dominantDrive) {
         case (.cat, .rest): [.idleAction1, .stretch]
         case (.pauli, .rest): [.idleAction2, .idleAction1]
         case (.dog, .rest): [.stretch, .idleAction1]
@@ -159,6 +179,13 @@ public enum PetAutonomyDirector {
         case (.pauli, .seekAttention): [.perkUp, .idleAction2, .lookAround]
         case (.dog, .seekAttention): [.perkUp, .walk, .idleAction2]
         case (_, .encourageBreak): [.stretch, .perkUp, .stretch]
+        }
+        if state.dominantDrive == .seekAttention,
+           let preferredEvent = attentionEvent(
+               for: state.preferredInteraction
+           ) {
+            events.removeAll { $0 == preferredEvent }
+            events.insert(preferredEvent, at: 0)
         }
         let index = Int(roll.magnitude % UInt(events.count))
         return events[index]
@@ -183,6 +210,25 @@ public enum PetAutonomyDirector {
     private static func safeNonnegative(_ value: Double) -> Double {
         guard value.isFinite else { return 0 }
         return max(0, value)
+    }
+
+    private static func attentionEvent(
+        for preference: PetInteractionPreference?
+    ) -> PetMotionEvent? {
+        switch preference {
+        case .pat, .boop, .scratch, .nuzzle:
+            .perkUp
+        case .swipe:
+            .idleAction1
+        case .dance:
+            .idleAction2
+        case .treat:
+            .lookAround
+        case .toy:
+            .walk
+        case nil:
+            nil
+        }
     }
 
     private static func clampUnit(_ value: Double) -> Double {

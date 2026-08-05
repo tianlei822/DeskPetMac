@@ -3,41 +3,93 @@ import SwiftUI
 
 struct PersonalityBubble: View {
     let moment: PersonalityMoment
+    let layout: PetBubbleLayout
 
     var body: some View {
         Text(moment.line)
-            .font(.system(size: 11, weight: .bold, design: .rounded))
+            .font(Font.system(size: 11, weight: .bold, design: .rounded))
             .multilineTextAlignment(.center)
-            .foregroundStyle(foregroundColor)
-            .lineLimit(2)
+            .foregroundStyle(.primary)
+            .lineLimit(isSideMounted ? 4 : 2)
             .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 12)
             .padding(.vertical, 9)
-            .frame(maxWidth: 194)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .overlay(
-                RoundedRectangle(cornerRadius: 16, style: .continuous)
-                    .stroke(.white.opacity(0.42), lineWidth: 1)
+            .frame(
+                width: bubbleWidth,
+                height: bubbleHeight
             )
-            .overlay(alignment: .bottom) {
+            .petContrastSurface(
+                cornerRadius: 16,
+                borderOpacity: 0.42,
+                shadowOpacity: 0.12,
+                shadowRadius: 9,
+                shadowY: 4
+            )
+            .overlay(alignment: tailAlignment) {
                 SpeechTail()
                     .fill(tailColor)
                     .frame(width: 18, height: 10)
-                    .offset(y: 8)
+                    .rotationEffect(tailRotation)
+                    .offset(
+                        x: tailOffset.width,
+                        y: tailOffset.height
+                    )
             }
-            .shadow(color: .black.opacity(0.12), radius: 9, y: 4)
             .accessibilityLabel(moment.line)
             .accessibilityAddTraits(.isStaticText)
     }
 
-    private var foregroundColor: Color {
-        switch moment.petKind {
-        case .cat:
-            Color(red: 0.31, green: 0.22, blue: 0.25)
-        case .pauli:
-            Color(red: 0.20, green: 0.31, blue: 0.38)
-        case .dog:
-            Color(red: 0.48, green: 0.25, blue: 0.08)
+    private var isSideMounted: Bool {
+        layout.tailEdge != .bottom
+    }
+
+    private var bubbleWidth: CGFloat {
+        CGFloat(layout.bubbleWidth)
+    }
+
+    private var bubbleHeight: CGFloat? {
+        layout.bubbleHeight.map { CGFloat($0) }
+    }
+
+    private var tailAlignment: Alignment {
+        switch layout.tailEdge {
+        case .bottom:
+            .bottom
+        case .leading:
+            .leading
+        case .trailing:
+            .trailing
+        }
+    }
+
+    private var tailRotation: Angle {
+        switch layout.tailEdge {
+        case .bottom:
+            .zero
+        case .leading:
+            .degrees(90)
+        case .trailing:
+            .degrees(-90)
+        }
+    }
+
+    private var tailOffset: CGSize {
+        switch layout.tailEdge {
+        case .bottom:
+            CGSize(
+                width: layout.tailHorizontalOffset,
+                height: 8
+            )
+        case .leading:
+            CGSize(
+                width: -8,
+                height: layout.tailVerticalOffset
+            )
+        case .trailing:
+            CGSize(
+                width: 8,
+                height: layout.tailVerticalOffset
+            )
         }
     }
 

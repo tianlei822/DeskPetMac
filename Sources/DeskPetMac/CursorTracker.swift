@@ -1,17 +1,15 @@
 import AppKit
+import DeskPetCore
 
 /// Watches the mouse globally and reports a normalized offset from the pet
 /// window's center so the pet can notice the cursor approaching. Receive-only
 /// monitors — no accessibility permission required.
 @MainActor
 final class CursorTracker {
-    /// Offset relative to the window center in the -1...1 range, y positive
-    /// down (matching SwiftUI). `nil` when the cursor is far away.
-    private(set) var normalizedOffset: CGSize?
-
     private var globalMonitor: Any?
     private var localMonitor: Any?
     private var lastHandledAt = Date.distantPast
+    private var attentionTracker = PetAttentionTracker()
 
     private static let minimumInterval: TimeInterval = 1.0 / 30.0
     private static let attentionRadius: Double = 480
@@ -45,7 +43,16 @@ final class CursorTracker {
             NSEvent.removeMonitor(monitor)
             localMonitor = nil
         }
-        normalizedOffset = nil
+        attentionTracker.observe(
+            offset: nil,
+            at: Date().timeIntervalSinceReferenceDate
+        )
+    }
+
+    /// Offset relative to the window center in the -1...1 range, y positive
+    /// down (matching SwiftUI), plus time since entering the attention radius.
+    func attentionSample(at time: TimeInterval) -> PetAttentionSample? {
+        attentionTracker.sample(at: time)
     }
 
     private func handleMouseMoved() {
@@ -55,7 +62,10 @@ final class CursorTracker {
 
         guard let window = NSApp.windows.first(where: { $0.isVisible })
             ?? NSApp.windows.first else {
-            normalizedOffset = nil
+            attentionTracker.observe(
+                offset: nil,
+                at: now.timeIntervalSinceReferenceDate
+            )
             return
         }
 
@@ -64,13 +74,19 @@ final class CursorTracker {
         let dx = pointer.x - center.x
         let dy = pointer.y - center.y
         guard hypot(dx, dy) <= Self.attentionRadius else {
-            normalizedOffset = nil
+            attentionTracker.observe(
+                offset: nil,
+                at: now.timeIntervalSinceReferenceDate
+            )
             return
         }
 
-        normalizedOffset = CGSize(
-            width: Self.clampUnit(dx / Self.fullLeanDistance),
-            height: Self.clampUnit(-dy / Self.fullLeanDistance)
+        attentionTracker.observe(
+            offset: CGSize(
+                width: Self.clampUnit(dx / Self.fullLeanDistance),
+                height: Self.clampUnit(-dy / Self.fullLeanDistance)
+            ),
+            at: now.timeIntervalSinceReferenceDate
         )
     }
 

@@ -330,7 +330,28 @@ public struct WeatherSceneProfile: Equatable, Sendable {
     }
 
     public func renderingMode(reduceMotion: Bool) -> WeatherRenderingMode {
-        reduceMotion ? .staticCue : .animated
+        if reduceMotion {
+            return .staticCue
+        }
+        return switch mood {
+        case .sunny, .cozy:
+            .staticCue
+        case .cloudy, .foggy, .rainy, .snowy, .stormy:
+            .animated
+        }
+    }
+
+    public func framesPerSecond(for depth: WeatherDepth) -> Double {
+        switch mood {
+        case .sunny, .cloudy, .foggy, .cozy:
+            8
+        case .rainy, .snowy, .stormy:
+            switch depth {
+            case .background: 12
+            case .midground: 18
+            case .foreground: 24
+            }
+        }
     }
 
     public func particleProfile(

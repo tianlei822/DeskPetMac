@@ -312,6 +312,50 @@ public enum PetMotionDirector {
         }
     }
 
+    public static func rootMotionFrame(
+        pet: PetKind,
+        rootMotion: PetRootMotionFrame,
+        reduceMotion: Bool
+    ) -> PetMotionFrame {
+        guard !reduceMotion else { return .idle }
+
+        switch rootMotion.phase {
+        case .notice:
+            return gestureFrame(
+                event: .perkUp,
+                pet: pet,
+                progress: rootMotion.phaseProgress * 0.45
+            )
+        case .anticipate:
+            return gestureFrame(
+                event: .perkUp,
+                pet: pet,
+                progress: 0.45 + rootMotion.phaseProgress * 0.55
+            )
+        case .turning:
+            return .idle
+        case .walking, .slowing:
+            guard rootMotion.stepCount > 0 else { return .idle }
+            let cadence = cadence(for: pet, seed: 0)
+            let stridePosition = Double(rootMotion.stepIndex)
+                + rootMotion.stridePhase
+            return walkFrame(
+                pet: pet,
+                cadence: cadence,
+                stepCount: rootMotion.stepCount,
+                elapsed: stridePosition / cadence.stepsPerSecond
+            )
+        case .settling:
+            return gestureFrame(
+                event: .lookAround,
+                pet: pet,
+                progress: rootMotion.phaseProgress
+            )
+        case .completed:
+            return .idle
+        }
+    }
+
     public static func isStrongWeatherReactionActive(
         _ reaction: PetWeatherReaction,
         time: Double

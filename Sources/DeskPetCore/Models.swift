@@ -1,6 +1,6 @@
 import Foundation
 
-public enum PetWeatherMood: String, CaseIterable, Equatable, Sendable {
+public enum PetWeatherMood: String, CaseIterable, Codable, Equatable, Sendable {
     case sunny
     case cloudy
     case foggy
@@ -58,7 +58,7 @@ public enum PetWeatherMood: String, CaseIterable, Equatable, Sendable {
     }
 }
 
-public enum PetKind: String, CaseIterable, Equatable, Sendable {
+public enum PetKind: String, CaseIterable, Codable, Equatable, Sendable {
     case cat
     case pauli
     case dog
