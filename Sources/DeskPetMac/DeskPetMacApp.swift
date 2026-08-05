@@ -1,45 +1,68 @@
 import AppKit
+import DeskPetCore
 import SwiftUI
 
 @main
 struct DeskPetMacApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var model = PetViewModel()
 
     var body: some Scene {
-        WindowGroup {
-            PetWindowView(model: model)
-                .frame(width: 260, height: 290)
-                .task {
-                    await model.start()
-                }
+        MenuBarExtra {
+            PetMenuView(model: appDelegate.model)
+        } label: {
+            Label("DeskPet", systemImage: "pawprint.fill")
         }
-        .windowResizability(.contentSize)
+        .menuBarExtraStyle(.window)
         .commands {
-            CommandGroup(replacing: .newItem) {}
-            CommandMenu("Pet") {
-                Button("Pat") { model.pat() }
-                    .keyboardShortcut("p", modifiers: [.command])
-                Button("Dance") { model.dance() }
-                    .keyboardShortcut("d", modifiers: [.command])
-                Button("Give Treat") { model.giveTreat() }
-                    .keyboardShortcut("t", modifiers: [.command])
-                Button("Use Cat") { model.selectPetKind(.cat) }
-                    .keyboardShortcut("1", modifiers: [.command])
-                Button("Use Pauli") { model.selectPetKind(.pauli) }
-                    .keyboardShortcut("2", modifiers: [.command])
-                Button("Use Dog") { model.selectPetKind(.dog) }
-                    .keyboardShortcut("3", modifiers: [.command])
-                Button("Take Break") { model.takeBreak() }
-                    .keyboardShortcut("b", modifiers: [.command])
+            CommandMenu("DeskPet") {
+                Button("Pat") {
+                    appDelegate.model.pat()
+                }
+                .keyboardShortcut("p", modifiers: .command)
+
+                Button("Dance") {
+                    appDelegate.model.dance()
+                }
+                .keyboardShortcut("d", modifiers: .command)
+
+                Button("Give Treat") {
+                    appDelegate.model.giveTreat()
+                }
+                .keyboardShortcut("t", modifiers: .command)
+
+                Button("Take a Stroll") {
+                    appDelegate.model.takeStroll()
+                }
+                .keyboardShortcut("g", modifiers: .command)
+
+                Button("Take a Break") {
+                    appDelegate.model.takeBreak()
+                }
+                .keyboardShortcut("b", modifiers: .command)
+
+                Divider()
+
+                Button("Use Cat") {
+                    appDelegate.model.selectPetKind(.cat)
+                }
+                .keyboardShortcut("1", modifiers: .command)
+
+                Button("Use Pauli") {
+                    appDelegate.model.selectPetKind(.pauli)
+                }
+                .keyboardShortcut("2", modifiers: .command)
+
+                Button("Use Dog") {
+                    appDelegate.model.selectPetKind(.dog)
+                }
+                .keyboardShortcut("3", modifiers: .command)
+
+                Divider()
+
                 Button("Refresh Weather") {
-                    Task { await model.refreshWeather() }
+                    Task { await appDelegate.model.refreshWeather() }
                 }
-                .keyboardShortcut("r", modifiers: [.command])
-                Button("Quit DeskPet") {
-                    NSApp.terminate(nil)
-                }
-                .keyboardShortcut("q", modifiers: [.command])
+                .keyboardShortcut("r", modifiers: .command)
             }
         }
     }

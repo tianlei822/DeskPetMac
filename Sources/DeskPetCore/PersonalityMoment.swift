@@ -20,6 +20,7 @@ public struct PersonalityMoment: Identifiable, Equatable, Sendable {
     public let petKind: PetKind
     public let category: PersonalityMomentCategory
     public let pose: PersonalityPose
+    public let relationshipGesture: PetRelationshipGesture?
     public let line: String
     public let moods: [PetWeatherMood]
     public let minimumWorkProgress: Double?
@@ -30,6 +31,7 @@ public struct PersonalityMoment: Identifiable, Equatable, Sendable {
         petKind: PetKind,
         category: PersonalityMomentCategory,
         pose: PersonalityPose,
+        relationshipGesture: PetRelationshipGesture? = nil,
         line: String,
         moods: [PetWeatherMood] = [],
         minimumWorkProgress: Double? = nil,
@@ -39,6 +41,7 @@ public struct PersonalityMoment: Identifiable, Equatable, Sendable {
         self.petKind = petKind
         self.category = category
         self.pose = pose
+        self.relationshipGesture = relationshipGesture
         self.line = line
         self.moods = moods
         self.minimumWorkProgress = minimumWorkProgress

@@ -59,12 +59,16 @@ struct WeatherSceneProfileTests {
         }
     }
 
-    @Test("Reduce Motion produces static profiles")
-    func reduceMotionIsStatic() {
+    @Test("ambient weather stays static while active weather animates")
+    func renderingModesRespectEnergyBudget() {
         for mood in PetWeatherMood.allCases {
             let profile = WeatherSceneProfile(mood: mood)
             #expect(profile.renderingMode(reduceMotion: true) == .staticCue)
-            #expect(profile.renderingMode(reduceMotion: false) == .animated)
+            if mood == .sunny || mood == .cozy {
+                #expect(profile.renderingMode(reduceMotion: false) == .staticCue)
+            } else {
+                #expect(profile.renderingMode(reduceMotion: false) == .animated)
+            }
         }
     }
 
@@ -414,6 +418,13 @@ struct PetArtworkManifestTests {
             #expect(manifest.personality[.perk] == fixture.perk)
             #expect(manifest.personality[.stretch] == fixture.stretch)
             #expect(manifest.personality[.proud] == fixture.proud)
+            let directory = String(fixture.base.dropLast("base".count))
+            #expect(manifest.resourceName(for: .anticipate)
+                == "\(directory)anticipate")
+            #expect(manifest.resourceName(for: .turn)
+                == "\(directory)turn")
+            #expect(manifest.resourceName(for: .settle)
+                == "\(directory)settle")
 
             #expect(manifest.resourceName(for: .idle) == fixture.base)
             #expect(manifest.resourceName(for: .blink) == fixture.blink)
@@ -446,7 +457,25 @@ struct PetArtworkManifestTests {
             #expect(manifest.walk.last?.hasSuffix("/walk6") == true)
             #expect(manifest.idleActions.first?.hasSuffix("/idleAction1") == true)
             #expect(manifest.idleActions.last?.hasSuffix("/idleAction2") == true)
-            #expect(manifest.motionResourceNames.count == 11)
+            #expect(manifest.transitionResourceNames.count == 3)
+            #expect(manifest.motionResourceNames.count == 14)
+            #expect(manifest.runtimeMotionResourceNames.count == 1)
+            #expect(
+                manifest.runtimeMotionResourceNames
+                    == [manifest.personality[.stretch] ?? manifest.base]
+            )
+            #expect(
+                Set(manifest.runtimeMotionResourceNames)
+                    .isDisjoint(with: manifest.walk)
+            )
+            #expect(
+                Set(manifest.runtimeMotionResourceNames)
+                    .isDisjoint(with: manifest.idleActions)
+            )
+            #expect(
+                Set(manifest.runtimeMotionResourceNames)
+                    .isDisjoint(with: manifest.transitionClipResourceNames)
+            )
         }
     }
 
@@ -454,8 +483,10 @@ struct PetArtworkManifestTests {
     func motionArtworkValidationRejectsPartialSets() {
         for petKind in PetKind.allCases {
             let manifest = PetArtworkManifest(petKind: petKind)
-            let completeResources = Set(manifest.motionResourceNames)
-            let partialResources = Set(manifest.motionResourceNames.dropLast())
+            let completeResources = Set(manifest.runtimeMotionResourceNames)
+            let partialResources = Set(
+                manifest.runtimeMotionResourceNames.dropLast()
+            )
 
             #expect(manifest.hasCompleteMotionSet(
                 availableResourceNames: completeResources
@@ -520,6 +551,1076 @@ struct PetArtworkManifestTests {
             for: PetMotionEvent.walk,
             frameIndex: 6
         ) == "Pets/Dog/base")
+    }
+
+    @Test("root-motion phases select explicit transition artwork")
+    func rootMotionPhasesSelectTransitionArtwork() {
+        #expect(PetRootMotionPhase.notice.transitionPose == nil)
+        #expect(PetRootMotionPhase.anticipate.transitionPose == .anticipate)
+        #expect(PetRootMotionPhase.turning.transitionPose == .turn)
+        #expect(PetRootMotionPhase.walking.transitionPose == nil)
+        #expect(PetRootMotionPhase.slowing.transitionPose == nil)
+        #expect(PetRootMotionPhase.settling.transitionPose == .settle)
+        #expect(PetRootMotionPhase.completed.transitionPose == nil)
+    }
+}
+
+@Suite("Pet artwork layout")
+struct PetArtworkLayoutTests {
+    @Test("aligned idle artwork shares one registration")
+    func alignedIdleArtworkSharesRegistration() {
+        for petKind in PetKind.allCases {
+            let manifest = PetArtworkManifest(petKind: petKind)
+            let base = PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.base
+            )
+            let blink = PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.blink
+            )
+
+            #expect(base == blink)
+        }
+    }
+
+    @Test("animal sleep poses move toward a wider contact shadow")
+    func animalSleepPosesAreGrounded() {
+        for petKind in [PetKind.cat, .dog] {
+            let manifest = PetArtworkManifest(petKind: petKind)
+            let idle = PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.base
+            )
+            let sleep = PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.sleep
+            )
+
+            #expect(sleep.verticalOffset > idle.verticalOffset + 20)
+            #expect(sleep.shadowWidth > idle.shadowWidth + 30)
+            #expect(sleep.shadowHeight >= idle.shadowHeight)
+        }
+    }
+
+    @Test("layout values stay finite and inside the scene budget")
+    func layoutValuesStaySafe() {
+        for petKind in PetKind.allCases {
+            let manifest = PetArtworkManifest(petKind: petKind)
+            let resources = [
+                manifest.base,
+                manifest.blink,
+                manifest.hover,
+                manifest.pat,
+                manifest.sleep,
+            ] + manifest.walk + manifest.idleActions
+                + manifest.transitionResourceNames
+                + manifest.transitionClipResourceNames
+                + PersonalityPose.allCases.map {
+                    manifest.resourceName(for: .personality($0))
+                }
+
+            for resourceName in resources {
+                let layout = PetArtworkLayout.resolve(
+                    petKind: petKind,
+                    resourceName: resourceName
+                )
+                let values = [
+                    layout.scale,
+                    layout.verticalOffset,
+                    layout.shadowWidth,
+                    layout.shadowHeight,
+                    layout.shadowVerticalOffset,
+                ]
+
+                #expect(values.allSatisfy { $0.isFinite })
+                #expect((0.8...1.2).contains(layout.scale))
+                let verticalOffsetRange = manifest.transitionClipResourceNames
+                    .contains(resourceName)
+                    ? (-24.0...60)
+                    : (-10.0...60)
+                #expect(verticalOffsetRange.contains(layout.verticalOffset))
+                #expect((70...170).contains(layout.shadowWidth))
+                #expect((10...24).contains(layout.shadowHeight))
+                #expect((65...90).contains(layout.shadowVerticalOffset))
+            }
+        }
+    }
+
+    @Test("unknown resources use the pet default registration")
+    func unknownResourcesUseDefaultRegistration() {
+        for petKind in PetKind.allCases {
+            let manifest = PetArtworkManifest(petKind: petKind)
+            #expect(PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: "Pets/Unknown/missing"
+            ) == PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.base
+            ))
+        }
+    }
+
+    @Test("walk frames share the idle foot baseline within two pixels")
+    func walkFramesShareFootBaseline() {
+        let sourceBottoms: [PetKind: (base: Double, walk: [Double])] = [
+            .cat: (1_079, [1_115, 1_115, 1_117, 1_117, 1_119, 1_117]),
+            .pauli: (1_185, [1_171, 1_180, 1_166, 1_177, 1_183, 1_182]),
+            .dog: (1_192, [1_178, 1_208, 1_203, 1_209, 1_211, 1_185]),
+        ]
+
+        for petKind in PetKind.allCases {
+            let manifest = PetArtworkManifest(petKind: petKind)
+            let baseLayout = PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.base
+            )
+            let bounds = sourceBottoms[petKind]!
+            let baseLine = bounds.base * 190 / 1_254 * baseLayout.scale
+
+            for (index, resourceName) in manifest.walk.enumerated() {
+                let layout = PetArtworkLayout.resolve(
+                    petKind: petKind,
+                    resourceName: resourceName
+                )
+                let renderedLine = bounds.walk[index] * 190 / 1_254
+                    * layout.scale + layout.verticalOffset
+                #expect(abs(renderedLine - baseLine) < 0.25)
+            }
+        }
+    }
+
+    @Test("transition poses share the idle foot baseline within two pixels")
+    func transitionFramesShareFootBaseline() {
+        let sourceBottoms: [PetKind: (
+            base: Double,
+            transitions: [PetTransitionPose: Double]
+        )] = [
+            .cat: (1_079, [.anticipate: 1_073, .turn: 1_101, .settle: 1_049]),
+            .pauli: (1_185, [.anticipate: 1_141, .turn: 1_182, .settle: 1_188]),
+            .dog: (1_192, [.anticipate: 1_145, .turn: 1_141, .settle: 1_097]),
+        ]
+
+        for petKind in PetKind.allCases {
+            let manifest = PetArtworkManifest(petKind: petKind)
+            let baseLayout = PetArtworkLayout.resolve(
+                petKind: petKind,
+                resourceName: manifest.base
+            )
+            let bounds = sourceBottoms[petKind]!
+            let baseLine = bounds.base * 190 / 1_254 * baseLayout.scale
+
+            for pose in PetTransitionPose.allCases {
+                let resourceName = manifest.resourceName(for: pose)
+                let layout = PetArtworkLayout.resolve(
+                    petKind: petKind,
+                    resourceName: resourceName
+                )
+                let sourceBottom = bounds.transitions[pose]!
+                let renderedLine = sourceBottom * 190 / 1_254
+                    * layout.scale + layout.verticalOffset
+                #expect(abs(renderedLine - baseLine) < 0.25)
+            }
+        }
+    }
+}
+
+@Suite("Pet bubble layout")
+struct PetBubbleLayoutTests {
+    @Test("each companion exposes a stable normalized head anchor")
+    func headAnchorsStayInsideArtwork() {
+        let expected: [PetKind: CGPoint] = [
+            .cat: CGPoint(x: 0.44, y: 0.35),
+            .pauli: CGPoint(x: 0.50, y: 0.38),
+            .dog: CGPoint(x: 0.46, y: 0.39),
+        ]
+
+        for petKind in PetKind.allCases {
+            let anchor = PetHeadAnchor.resolve(for: petKind)
+            #expect(anchor.normalizedPoint == expected[petKind])
+            #expect((0...1).contains(anchor.normalizedPoint.x))
+            #expect((0...1).contains(anchor.normalizedPoint.y))
+        }
+    }
+
+    @Test("personality bubble tails point at each companion head")
+    func personalityTailTargetsHeadAnchor() {
+        let geometry = PetBubbleGeometry.standard
+        let bubbleCenters: [PetBubblePlacement: Double] = [
+            .leading: geometry.horizontalPadding + geometry.bubbleWidth / 2,
+            .center: geometry.sceneWidth / 2,
+            .trailing: geometry.sceneWidth
+                - geometry.horizontalPadding
+                - geometry.bubbleWidth / 2,
+        ]
+
+        for petKind in PetKind.allCases {
+            let head = PetHeadAnchor.resolve(for: petKind)
+            let artworkOriginX = (
+                geometry.sceneWidth - geometry.artworkWidth
+            ) / 2
+            let expectedTargetX = artworkOriginX
+                + head.normalizedPoint.x * geometry.artworkWidth
+
+            for placement in [
+                PetBubblePlacement.leading,
+                .center,
+                .trailing,
+            ] {
+                let layout = PetBubbleLayout.resolve(
+                    kind: .personality,
+                    petKind: petKind,
+                    placement: placement,
+                    geometry: geometry
+                )
+                let resolvedTargetX = bubbleCenters[placement]!
+                    + layout.tailHorizontalOffset
+
+                #expect(abs(resolvedTargetX - expectedTargetX) < 0.001)
+            }
+        }
+    }
+
+    @Test("bubble aligns toward the roomiest side of the screen")
+    func bubbleUsesAvailableScreenSpace() {
+        let nearRightEdge = PetBubbleLayout.resolve(
+            kind: .status,
+            windowMinX: 1150,
+            windowMaxX: 1410,
+            visibleMinX: 0,
+            visibleMaxX: 1440
+        )
+        let nearLeftEdge = PetBubbleLayout.resolve(
+            kind: .status,
+            windowMinX: 30,
+            windowMaxX: 290,
+            visibleMinX: 0,
+            visibleMaxX: 1440
+        )
+
+        #expect(nearRightEdge.placement == .leading)
+        #expect(nearRightEdge.tailHorizontalOffset > 0)
+        #expect(nearLeftEdge.placement == .trailing)
+        #expect(nearLeftEdge.tailHorizontalOffset < 0)
+    }
+
+    @Test("balanced screen space keeps the bubble centered")
+    func balancedSpaceCentersBubble() {
+        let layout = PetBubbleLayout.resolve(
+            kind: .personality,
+            windowMinX: 590,
+            windowMaxX: 850,
+            visibleMinX: 0,
+            visibleMaxX: 1440
+        )
+
+        #expect(layout.placement == .center)
+        #expect(layout.tailHorizontalOffset == 0)
+    }
+
+    @Test("top constrained windows mount speech beside the pet")
+    func topConstrainedWindowUsesSidePlacement() {
+        let nearTopRight = PetBubbleLayout.resolve(
+            kind: .personality,
+            windowMinX: 1150,
+            windowMaxX: 1410,
+            windowMinY: 590,
+            windowMaxY: 880,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            visibleMinY: 0,
+            visibleMaxY: 900
+        )
+        let nearTopLeft = PetBubbleLayout.resolve(
+            kind: .personality,
+            windowMinX: 30,
+            windowMaxX: 290,
+            windowMinY: 590,
+            windowMaxY: 880,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            visibleMinY: 0,
+            visibleMaxY: 900
+        )
+
+        #expect(nearTopRight.placement == .sideLeading)
+        #expect(nearTopLeft.placement == .sideTrailing)
+    }
+
+    @Test("side speech frees vertical room and points inward")
+    func sideSpeechUsesCompactInwardGeometry() {
+        let leading = PetBubbleLayout.resolve(
+            kind: .personality,
+            petKind: .cat,
+            placement: .sideLeading
+        )
+        let trailing = PetBubbleLayout.resolve(
+            kind: .personality,
+            petKind: .dog,
+            placement: .sideTrailing
+        )
+
+        #expect(leading.bubbleWidth == PetBubbleGeometry.standard.sideBubbleWidth)
+        #expect(trailing.bubbleWidth == PetBubbleGeometry.standard.sideBubbleWidth)
+        #expect(leading.sceneVerticalOffset == 0)
+        #expect(trailing.sceneVerticalOffset == 0)
+        #expect(leading.sceneHorizontalOffset > 0)
+        #expect(trailing.sceneHorizontalOffset < 0)
+        #expect(leading.tailEdge == .trailing)
+        #expect(trailing.tailEdge == .leading)
+        #expect(leading.bubbleTopOffset > 40)
+        #expect(trailing.bubbleTopOffset > 40)
+
+        let geometry = PetBubbleGeometry.standard
+        let artworkOriginX = (geometry.sceneWidth - geometry.artworkWidth) / 2
+        let leadingBubbleEdge = geometry.sideHorizontalPadding
+            + geometry.sideBubbleWidth
+        let trailingBubbleEdge = geometry.sceneWidth
+            - geometry.sideHorizontalPadding
+            - geometry.sideBubbleWidth
+        for petKind in PetKind.allCases {
+            let headX = artworkOriginX
+                + PetHeadAnchor.resolve(for: petKind).normalizedPoint.x
+                    * geometry.artworkWidth
+            #expect(
+                headX + leading.sceneHorizontalOffset - leadingBubbleEdge
+                    >= 24
+            )
+            #expect(
+                trailingBubbleEdge
+                    - (headX + trailing.sceneHorizontalOffset) >= 24
+            )
+        }
+
+        #expect(
+            artworkOriginX + leading.sceneHorizontalOffset
+                + geometry.artworkWidth <= geometry.sceneWidth
+        )
+        #expect(artworkOriginX + trailing.sceneHorizontalOffset >= 0)
+    }
+
+    @Test("interactive bubbles remain overhead even near the menu bar")
+    func interactiveBubblesStayOverhead() {
+        for kind in [PetBubbleKind.reminder, .status] {
+            let layout = PetBubbleLayout.resolve(
+                kind: kind,
+                petKind: .pauli,
+                placement: .sideTrailing
+            )
+
+            #expect(layout.placement == .trailing)
+            #expect(layout.tailEdge == .bottom)
+            #expect(layout.bubbleWidth == PetBubbleGeometry.standard.bubbleWidth)
+            #expect(layout.sceneVerticalOffset > 0)
+        }
+    }
+
+    @Test("larger bubbles reserve more room above the pet")
+    func largerBubblesReserveMoreRoom() {
+        let reminder = PetBubbleLayout.resolve(kind: .reminder)
+        let status = PetBubbleLayout.resolve(kind: .status)
+        let personality = PetBubbleLayout.resolve(kind: .personality)
+
+        #expect(reminder.sceneVerticalOffset > status.sceneVerticalOffset)
+        #expect(status.sceneVerticalOffset > personality.sceneVerticalOffset)
+        #expect(personality.sceneVerticalOffset > 0)
+        #expect(reminder.sceneVerticalOffset <= 44)
+    }
+
+    @Test("invalid window geometry falls back to a finite centered layout")
+    func invalidGeometryIsSafe() {
+        let layout = PetBubbleLayout.resolve(
+            kind: .status,
+            windowMinX: .nan,
+            windowMaxX: .infinity,
+            visibleMinX: 0,
+            visibleMaxX: 1440
+        )
+
+        #expect(layout.placement == .center)
+        #expect(layout.sceneVerticalOffset.isFinite)
+        #expect(layout.tailHorizontalOffset.isFinite)
+    }
+}
+
+@Suite("Pet window anchor")
+struct PetWindowAnchorTests {
+    @Test("window position survives a visible-frame size change")
+    func positionScalesWithVisibleFrame() {
+        let anchor = PetWindowAnchor.capture(
+            windowFrame: CGRect(x: 400, y: 300, width: 200, height: 200),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1000, height: 800)
+        )
+        let restored = anchor.resolve(
+            windowSize: CGSize(width: 200, height: 200),
+            visibleFrame: CGRect(x: 100, y: 50, width: 1400, height: 900)
+        )
+
+        #expect(anchor.horizontal == 0.5)
+        #expect(anchor.vertical == 0.5)
+        #expect(restored == CGPoint(x: 700, y: 400))
+    }
+
+    @Test("offscreen origins are clamped into the visible frame")
+    func offscreenOriginsAreClamped() {
+        let anchor = PetWindowAnchor.capture(
+            windowFrame: CGRect(x: 1800, y: -500, width: 260, height: 290),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+        let restored = anchor.resolve(
+            windowSize: CGSize(width: 260, height: 290),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        #expect(restored == CGPoint(x: 1180, y: 0))
+    }
+
+    @Test("invalid anchors and geometry use safe finite values")
+    func invalidValuesAreSafe() {
+        let anchor = PetWindowAnchor(horizontal: .nan, vertical: .infinity)
+        let restored = anchor.resolve(
+            windowSize: CGSize(width: 260, height: 290),
+            visibleFrame: CGRect(x: 0, y: 0, width: 1440, height: 900)
+        )
+
+        #expect(anchor == .default)
+        #expect(restored.x.isFinite)
+        #expect(restored.y.isFinite)
+    }
+}
+
+@Suite("Pet hit mask")
+struct PetHitMaskTests {
+    @Test("transparent window corners pass pointer events through")
+    func cornersAreTransparent() {
+        for petKind in PetKind.allCases {
+            #expect(!PetHitMask.contains(
+                normalizedPoint: CGPoint(x: 0.02, y: 0.02),
+                petKind: petKind
+            ))
+            #expect(!PetHitMask.contains(
+                normalizedPoint: CGPoint(x: 0.98, y: 0.98),
+                petKind: petKind
+            ))
+        }
+    }
+
+    @Test("head and torso regions remain directly interactive")
+    func bodyRegionsAreInteractive() {
+        for petKind in PetKind.allCases {
+            #expect(PetHitMask.contains(
+                normalizedPoint: CGPoint(x: 0.5, y: 0.42),
+                petKind: petKind
+            ))
+            #expect(PetHitMask.contains(
+                normalizedPoint: CGPoint(x: 0.5, y: 0.65),
+                petKind: petKind
+            ))
+        }
+    }
+
+    @Test("points outside normalized artwork bounds pass through")
+    func outsidePointsAreTransparent() {
+        #expect(!PetHitMask.contains(
+            normalizedPoint: CGPoint(x: -0.1, y: 0.5),
+            petKind: .cat
+        ))
+        #expect(!PetHitMask.contains(
+            normalizedPoint: CGPoint(x: 0.5, y: 1.1),
+            petKind: .dog
+        ))
+    }
+}
+
+@Suite("Pet render cadence")
+struct PetRenderCadenceTests {
+    @Test("direct interaction receives the 60 fps response budget")
+    func directInteractionUsesFastCadence() {
+        let cadence = PetRenderCadence.resolve(
+            reduceMotion: false,
+            isVisible: true,
+            isDirectInteraction: true,
+            isActiveMotion: false
+        )
+
+        #expect(cadence.maximumFramesPerSecond == 60)
+        #expect(!cadence.isPaused)
+    }
+
+    @Test("idle and autonomous motion stay inside the companion budget")
+    func ambientMotionUsesBoundedCadence() {
+        let idle = PetRenderCadence.resolve(
+            reduceMotion: false,
+            isVisible: true,
+            isDirectInteraction: false,
+            isActiveMotion: false
+        )
+        let active = PetRenderCadence.resolve(
+            reduceMotion: false,
+            isVisible: true,
+            isDirectInteraction: false,
+            isActiveMotion: true
+        )
+
+        #expect(idle.maximumFramesPerSecond == 12)
+        #expect(active.maximumFramesPerSecond == 30)
+    }
+
+    @Test("Reduce Motion lowers cadence and hidden windows pause")
+    func accessibilityAndVisibilityReduceWork() {
+        let reduced = PetRenderCadence.resolve(
+            reduceMotion: true,
+            isVisible: true,
+            isDirectInteraction: true,
+            isActiveMotion: true
+        )
+        let hidden = PetRenderCadence.resolve(
+            reduceMotion: false,
+            isVisible: false,
+            isDirectInteraction: true,
+            isActiveMotion: true
+        )
+
+        #expect(reduced.maximumFramesPerSecond == 8)
+        #expect(!reduced.isPaused)
+        #expect(hidden.isPaused)
+        #expect(hidden.minimumInterval.isFinite)
+        #expect(hidden.minimumInterval > 0)
+    }
+}
+
+@Suite("Pet activity graph")
+struct PetActivityGraphTests {
+    @Test("direct interaction wins over ambient and presentation states")
+    func directInteractionHasPriority() {
+        let activity = PetActivityGraph.resolve(PetActivityContext(
+            isSleeping: true,
+            isDancing: true,
+            isNuzzling: true,
+            isReminderVisible: true,
+            personalityPose: .peek,
+            autonomyDrive: .explore
+        ))
+
+        #expect(activity.kind == .nuzzling)
+        #expect(activity.priority > PetActivity.autonomous(.explore).priority)
+    }
+
+    @Test("reminder becomes a companion stretch when interaction is idle")
+    func reminderMapsToStretchActivity() {
+        let activity = PetActivityGraph.resolve(PetActivityContext(
+            isSleeping: false,
+            isDancing: false,
+            isNuzzling: false,
+            isReminderVisible: true,
+            personalityPose: .perk,
+            autonomyDrive: .selfCare
+        ))
+
+        #expect(activity.kind == .reminder)
+        #expect(activity.personalityPose == .stretch)
+    }
+
+    @Test("personality and autonomy context remain attached to the activity")
+    func contextStaysAttached() {
+        let personality = PetActivityGraph.resolve(PetActivityContext(
+            personalityPose: .proud,
+            autonomyDrive: .seekAttention
+        ))
+        let autonomy = PetActivityGraph.resolve(PetActivityContext(
+            autonomyDrive: .observeWeather
+        ))
+
+        #expect(personality.kind == .personality)
+        #expect(personality.personalityPose == .proud)
+        #expect(autonomy.kind == .autonomous)
+        #expect(autonomy.autonomyDrive == .observeWeather)
+    }
+
+    @Test("roaming sits above autonomy but below direct interaction")
+    func roamingUsesInterruptibleMidPriority() {
+        let roaming = PetActivityGraph.resolve(PetActivityContext(
+            isRoaming: true,
+            autonomyDrive: .explore
+        ))
+
+        #expect(roaming.kind == .roaming)
+        #expect(PetActivityGraph.canInterrupt(roaming, with: .dancing))
+        #expect(!PetActivityGraph.canInterrupt(roaming, with: .autonomous(.explore)))
+    }
+
+    @Test("only higher-priority activities interrupt a committed activity")
+    func interruptionsRespectPriority() {
+        let dance = PetActivity.dancing
+        let scratch = PetActivity.scratching
+        let nuzzle = PetActivity.nuzzling
+        let autonomy = PetActivity.autonomous(.explore)
+
+        #expect(PetActivityGraph.canInterrupt(dance, with: scratch))
+        #expect(PetActivityGraph.canInterrupt(scratch, with: nuzzle))
+        #expect(PetActivityGraph.canInterrupt(dance, with: nuzzle))
+        #expect(!PetActivityGraph.canInterrupt(dance, with: autonomy))
+        #expect(!PetActivityGraph.canInterrupt(nuzzle, with: dance))
+    }
+
+    @Test("scratch is represented as a direct interaction activity")
+    func scratchingMapsToDirectActivity() {
+        let activity = PetActivityGraph.resolve(PetActivityContext(
+            isSleeping: true,
+            isDancing: true,
+            isScratching: true,
+            isReminderVisible: true,
+            autonomyDrive: .rest
+        ))
+
+        #expect(activity.kind == .scratching)
+        #expect(activity.priority > PetActivity.dancing.priority)
+        #expect(activity.priority < PetActivity.nuzzling.priority)
+    }
+
+    @Test("feeding phases drive attentive poses below committed gestures")
+    func feedingMapsToCausalPoses() {
+        let watching = PetActivityGraph.resolve(PetActivityContext(
+            feedingPhase: .watching,
+            autonomyDrive: .selfCare
+        ))
+        let eating = PetActivityGraph.resolve(PetActivityContext(
+            feedingPhase: .eating,
+            autonomyDrive: .selfCare
+        ))
+
+        #expect(watching.kind == .feeding)
+        #expect(watching.personalityPose == .perk)
+        #expect(eating.personalityPose == .proud)
+        #expect(PetActivityGraph.canInterrupt(watching, with: .dancing))
+    }
+}
+
+@Suite("Pet root motion")
+struct PetRootMotionPlanTests {
+    @Test("plan flips away from a nearby screen edge")
+    func planFlipsAtScreenEdge() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 1100,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .right
+        )
+
+        #expect(plan.direction == .left)
+        #expect(plan.distance == 120)
+        #expect(plan.targetX == 980)
+    }
+
+    @Test("window travel follows notice, anticipate, turn, walk, slow, and settle phases")
+    func phasesStayBoundedAndMonotonic() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 100,
+            preferredDirection: .right
+        )
+        let samples = stride(
+            from: 0.0,
+            through: plan.duration,
+            by: plan.duration / 40
+        ).map { plan.frame(at: $0) }
+
+        #expect(plan.frame(at: 0).phase == .notice)
+        #expect(samples.contains { $0.phase == .anticipate })
+        #expect(samples.contains { $0.phase == .turning })
+        #expect(samples.contains { $0.phase == .walking })
+        #expect(samples.contains { $0.phase == .slowing })
+        #expect(samples.contains { $0.phase == .settling })
+        #expect(plan.frame(at: plan.duration).phase == .completed)
+        #expect(plan.frame(at: plan.duration).windowX == plan.targetX)
+        #expect(samples.allSatisfy { (400...500).contains($0.windowX) })
+        #expect(zip(samples, samples.dropFirst()).allSatisfy {
+            $0.windowX <= $1.windowX
+        })
+    }
+
+    @Test("travel distance and invalid geometry stay safe")
+    func travelBudgetIsSafe() {
+        let bounded = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 400,
+            preferredDirection: .right
+        )
+        let invalid = PetRootMotionPlan.resolve(
+            startX: .nan,
+            visibleMinX: 0,
+            visibleMaxX: .infinity,
+            windowWidth: 260,
+            desiredDistance: .nan,
+            preferredDirection: .left
+        )
+
+        #expect(bounded.distance == 160)
+        #expect(invalid.distance == 0)
+        #expect(invalid.targetX.isFinite)
+        #expect(invalid.duration.isFinite)
+    }
+
+    @Test("window travel holds during planted-foot intervals")
+    func plantedFootIntervalsHoldPosition() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 140,
+            preferredDirection: .right
+        )
+        let samples = (0...2_000).map {
+            plan.frame(at: plan.duration * Double($0) / 2_000)
+        }
+
+        #expect(plan.stepCount >= 3)
+        for stepIndex in 0..<plan.stepCount {
+            let leadingContact = samples.filter {
+                $0.stepIndex == stepIndex
+                    && ($0.phase == .walking || $0.phase == .slowing)
+                    && $0.stridePhase <= 0.13
+            }
+            let trailingContact = samples.filter {
+                $0.stepIndex == stepIndex
+                    && ($0.phase == .walking || $0.phase == .slowing)
+                    && $0.stridePhase >= 0.84
+            }
+
+            if let first = leadingContact.first, let last = leadingContact.last {
+                #expect(abs(last.windowX - first.windowX) < 2)
+            }
+            if let first = trailingContact.first, let last = trailingContact.last {
+                #expect(abs(last.windowX - first.windowX) < 2)
+            }
+        }
+    }
+
+    @Test("stride metadata is finite, bounded, and reaches every step")
+    func strideMetadataIsStable() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 700,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .left
+        )
+        let samples = (0...500).map {
+            plan.frame(at: plan.duration * Double($0) / 500)
+        }
+        let moving = samples.filter {
+            $0.phase == .walking || $0.phase == .slowing
+        }
+
+        #expect(Set(moving.map(\.stepIndex)) == Set(0..<plan.stepCount))
+        #expect(moving.allSatisfy { (0...1).contains($0.stridePhase) })
+        #expect(moving.allSatisfy { (0...1).contains($0.travelProgress) })
+        #expect(zip(moving, moving.dropFirst()).allSatisfy {
+            plan.direction == .left
+                ? $0.windowX >= $1.windowX
+                : $0.windowX <= $1.windowX
+        })
+    }
+
+    @Test("walk artwork consumes the exact root-motion stride phase")
+    func artworkAndTravelShareStridePhase() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .right
+        )
+        let rootFrame = plan.frame(
+            at: plan.preparationDuration + plan.movementDuration * 0.375
+        )
+        let artworkFrame = PetMotionDirector.rootMotionFrame(
+            pet: .cat,
+            rootMotion: rootFrame,
+            reduceMotion: false
+        )
+
+        #expect(rootFrame.phase == .walking)
+        #expect(rootFrame.stridePhase > 0.45)
+        #expect(rootFrame.stridePhase < 0.55)
+        #expect(artworkFrame.event == .walk)
+        #expect(artworkFrame.presentedArtworkFrameIndex == 3)
+        #expect(artworkFrame.stepCount == plan.stepCount)
+    }
+
+    @Test("transition weight shifts stay continuous across phase boundaries")
+    func transitionWeightShiftIsContinuous() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .right
+        )
+        let boundaries = [
+            plan.preparationDuration * 0.34,
+            plan.preparationDuration * 0.70,
+            plan.preparationDuration,
+            plan.preparationDuration + plan.movementDuration * 0.78,
+            plan.preparationDuration + plan.movementDuration,
+            plan.duration,
+        ]
+
+        for boundary in boundaries {
+            let before = PetRootTransitionMotion.pose(
+                for: plan.frame(at: max(0, boundary - 0.000_001)),
+                reduceMotion: false
+            )
+            let after = PetRootTransitionMotion.pose(
+                for: plan.frame(at: boundary + 0.000_001),
+                reduceMotion: false
+            )
+            #expect(rootPoseDistance(before, after) < 0.001)
+        }
+    }
+
+    @Test("left and right weight shifts mirror without changing compression")
+    func transitionWeightShiftMirrorsDirection() {
+        let right = PetRootMotionPlan.resolve(
+            startX: 500,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .right
+        )
+        let left = PetRootMotionPlan.resolve(
+            startX: 500,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .left
+        )
+
+        for index in 0...120 {
+            let elapsed = right.duration * Double(index) / 120
+            let rightPose = PetRootTransitionMotion.pose(
+                for: right.frame(at: elapsed),
+                reduceMotion: false
+            )
+            let leftPose = PetRootTransitionMotion.pose(
+                for: left.frame(at: elapsed),
+                reduceMotion: false
+            )
+
+            #expect(abs(rightPose.horizontalScale - leftPose.horizontalScale) < 0.000_001)
+            #expect(abs(rightPose.verticalScale - leftPose.verticalScale) < 0.000_001)
+            #expect(abs(rightPose.verticalOffset - leftPose.verticalOffset) < 0.000_001)
+            #expect(abs(rightPose.shadowScale - leftPose.shadowScale) < 0.000_001)
+            #expect(abs(rightPose.horizontalOffset + leftPose.horizontalOffset) < 0.000_001)
+            #expect(abs(rightPose.tiltDegrees + leftPose.tiltDegrees) < 0.000_001)
+            #expect(abs(rightPose.shadowOffset + leftPose.shadowOffset) < 0.000_001)
+        }
+    }
+
+    @Test("anticipation compresses before travel and settling returns neutral")
+    func transitionWeightShiftExpressesPreparationAndRecovery() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 120,
+            preferredDirection: .right
+        )
+        let anticipated = PetRootTransitionMotion.pose(
+            for: plan.frame(at: plan.preparationDuration * 0.70 - 0.000_001),
+            reduceMotion: false
+        )
+        let slowing = PetRootTransitionMotion.pose(
+            for: plan.frame(
+                at: plan.preparationDuration + plan.movementDuration - 0.000_001
+            ),
+            reduceMotion: false
+        )
+        let completed = PetRootTransitionMotion.pose(
+            for: plan.frame(at: plan.duration),
+            reduceMotion: false
+        )
+
+        #expect(anticipated.verticalScale < 0.98)
+        #expect(anticipated.verticalOffset > 1.5)
+        #expect(anticipated.shadowScale > 1.04)
+        #expect(slowing.horizontalOffset > 0.8)
+        #expect(slowing.verticalScale < 1)
+        #expect(completed == .neutral)
+    }
+
+    @Test("weight shifts are finite bounded and disabled by Reduce Motion")
+    func transitionWeightShiftStaysSafe() {
+        let plan = PetRootMotionPlan.resolve(
+            startX: 400,
+            visibleMinX: 0,
+            visibleMaxX: 1440,
+            windowWidth: 260,
+            desiredDistance: 160,
+            preferredDirection: .left
+        )
+
+        for index in 0...1_000 {
+            let frame = plan.frame(at: plan.duration * Double(index) / 1_000)
+            let pose = PetRootTransitionMotion.pose(
+                for: frame,
+                reduceMotion: false
+            )
+            #expect((0.94...1.08).contains(pose.horizontalScale))
+            #expect((0.94...1.03).contains(pose.verticalScale))
+            #expect(abs(pose.horizontalOffset) <= 4)
+            #expect(abs(pose.verticalOffset) <= 3)
+            #expect(abs(pose.tiltDegrees) <= 4)
+            #expect((0.9...1.12).contains(pose.shadowScale))
+            #expect(abs(pose.shadowOffset) <= 2)
+            #expect(PetRootTransitionMotion.pose(
+                for: frame,
+                reduceMotion: true
+            ) == .neutral)
+        }
+    }
+
+    private func rootPoseDistance(
+        _ lhs: PetRootTransitionPose,
+        _ rhs: PetRootTransitionPose
+    ) -> Double {
+        [
+            lhs.horizontalScale - rhs.horizontalScale,
+            lhs.verticalScale - rhs.verticalScale,
+            lhs.horizontalOffset - rhs.horizontalOffset,
+            lhs.verticalOffset - rhs.verticalOffset,
+            lhs.tiltDegrees - rhs.tiltDegrees,
+            lhs.shadowScale - rhs.shadowScale,
+            lhs.shadowOffset - rhs.shadowOffset,
+        ].map(abs).max() ?? 0
+    }
+}
+
+@Suite("Pet interaction map")
+struct PetInteractionMapTests {
+    @Test("each character exposes a small nose or sensor target")
+    func noseAndSensorTargetsResolveFirst() {
+        let points: [PetKind: CGPoint] = [
+            .cat: CGPoint(x: 0.44, y: 0.35),
+            .pauli: CGPoint(x: 0.50, y: 0.38),
+            .dog: CGPoint(x: 0.46, y: 0.39),
+        ]
+
+        for (petKind, point) in points {
+            #expect(PetInteractionMap.resolve(
+                normalizedPoint: point,
+                petKind: petKind
+            ) == .noseOrSensor)
+        }
+    }
+
+    @Test("head and torso points resolve to distinct interactions")
+    func bodyZonesStayDistinct() {
+        for petKind in PetKind.allCases {
+            #expect(PetInteractionMap.resolve(
+                normalizedPoint: CGPoint(x: 0.38, y: 0.42),
+                petKind: petKind
+            ) == .head)
+            #expect(PetInteractionMap.resolve(
+                normalizedPoint: CGPoint(x: 0.50, y: 0.70),
+                petKind: petKind
+            ) == .torso)
+        }
+    }
+
+    @Test("transparent and invalid points resolve to none")
+    func transparentPointsResolveToNone() {
+        for point in [
+            CGPoint(x: 0.02, y: 0.02),
+            CGPoint(x: 0.98, y: 0.98),
+            CGPoint(x: .nan, y: 0.5),
+        ] {
+            #expect(PetInteractionMap.resolve(
+                normalizedPoint: point,
+                petKind: .cat
+            ) == .none)
+        }
+    }
+}
+
+@Suite("Pet toys")
+struct PetToyTests {
+    @Test("each character gets a distinct play object")
+    func toyKindsAreCharacterSpecific() {
+        #expect(PetToyKind.forPet(.cat) == .laser)
+        #expect(PetToyKind.forPet(.pauli) == .energyNode)
+        #expect(PetToyKind.forPet(.dog) == .ball)
+    }
+
+    @Test("ball trajectory preserves endpoints and lifts through the middle")
+    func ballTrajectoryHasAnArc() {
+        let trajectory = PetToyTrajectory(
+            start: CGPoint(x: 0.2, y: 0.8),
+            end: CGPoint(x: 0.8, y: 0.7),
+            arcHeight: 0.25
+        )
+        let middle = trajectory.position(at: 0.5)
+
+        #expect(trajectory.position(at: 0) == CGPoint(x: 0.2, y: 0.8))
+        #expect(trajectory.position(at: 1) == CGPoint(x: 0.8, y: 0.7))
+        #expect(middle.y < 0.75)
+        #expect((0...1).contains(middle.x))
+        #expect((0...1).contains(middle.y))
+    }
+
+    @Test("toy positions and invalid progress remain inside the scene")
+    func trajectoryStaysSafe() {
+        let trajectory = PetToyTrajectory(
+            start: CGPoint(x: -2, y: CGFloat.nan),
+            end: CGPoint(x: 4, y: 3),
+            arcHeight: .infinity
+        )
+
+        for progress in [-1.0, 0, 0.5, 1, 2, .nan] {
+            let point = trajectory.position(at: progress)
+            #expect(point.x.isFinite)
+            #expect(point.y.isFinite)
+            #expect((0...1).contains(point.x))
+            #expect((0...1).contains(point.y))
+        }
+    }
+}
+
+@Suite("Pet quiet mode")
+struct PetQuietModePolicyTests {
+    @Test("quiet mode suppresses ambient presentation")
+    func quietModeSuppressesAmbientPresentation() {
+        for kind in [
+            PetPresentationKind.status,
+            .reminder,
+            .personality,
+        ] {
+            #expect(!PetQuietModePolicy.allows(kind, isQuietModeEnabled: true))
+            #expect(PetQuietModePolicy.allows(kind, isQuietModeEnabled: false))
+        }
+    }
+
+    @Test("quiet mode preserves feedback for intentional interaction")
+    func directFeedbackRemainsAvailable() {
+        #expect(PetQuietModePolicy.allows(
+            .directInteraction,
+            isQuietModeEnabled: true
+        ))
     }
 }
 

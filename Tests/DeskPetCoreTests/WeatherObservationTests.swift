@@ -92,6 +92,18 @@ struct WeatherObservationTests {
         }
     }
 
+    @Test("weather depth bands use proportional render budgets")
+    func depthCadenceIsProportional() {
+        let clouds = WeatherSceneProfile(mood: .cloudy)
+        #expect(clouds.framesPerSecond(for: .background) == 8)
+        #expect(clouds.framesPerSecond(for: .midground) == 8)
+
+        let storm = WeatherSceneProfile(mood: .stormy)
+        #expect(storm.framesPerSecond(for: .background) == 12)
+        #expect(storm.framesPerSecond(for: .midground) == 18)
+        #expect(storm.framesPerSecond(for: .foreground) == 24)
+    }
+
     @Test("invalid measurements fall back to safe normalized values")
     func invalidMeasurementsAreSafe() {
         let profile = WeatherSceneProfile(

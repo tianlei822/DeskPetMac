@@ -1,5 +1,11 @@
 import Foundation
 
+public enum PetBreakRitualPhase: Equatable, Sendable {
+    case idle
+    case stretching
+    case prompting
+}
+
 public struct BreakReminderPolicy: Sendable {
     public let reminderInterval: TimeInterval
     public let snoozeInterval: TimeInterval

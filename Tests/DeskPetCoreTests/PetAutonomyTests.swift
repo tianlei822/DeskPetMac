@@ -187,4 +187,68 @@ struct PetAutonomyTests {
         #expect(before == .idle)
         #expect(active.event == .stretch || active.event == .perkUp)
     }
+
+    @Test("familiar rhythm makes attention seeking happen sooner")
+    func memoryShapesSocialNeed() {
+        let unfamiliar = PetAutonomyDirector.state(
+            pet: .cat,
+            hourOfDay: 14,
+            secondsSinceInteraction: 12 * 60,
+            workProgress: 0.1,
+            mood: .cozy,
+            bondProgress: 0.4,
+            familiarity: 0,
+            preferredInteraction: nil,
+            rhythmAffinity: 0
+        )
+        let familiar = PetAutonomyDirector.state(
+            pet: .cat,
+            hourOfDay: 14,
+            secondsSinceInteraction: 12 * 60,
+            workProgress: 0.1,
+            mood: .cozy,
+            bondProgress: 0.4,
+            familiarity: 0.9,
+            preferredInteraction: .scratch,
+            rhythmAffinity: 1
+        )
+
+        #expect(familiar.socialNeed > unfamiliar.socialNeed + 0.15)
+        #expect(familiar.preferredInteraction == .scratch)
+        #expect(familiar.familiarity == 0.9)
+        #expect(familiar.rhythmAffinity == 1)
+    }
+
+    @Test("attention gestures reflect the remembered preference")
+    func preferredInteractionShapesMotion() {
+        let dancing = PetAutonomyState(
+            energy: 0.8,
+            curiosity: 0.5,
+            socialNeed: 0.9,
+            focusPressure: 0,
+            weatherInterest: 0.2,
+            dominantDrive: .seekAttention,
+            preferredInteraction: .dance
+        )
+        let playing = PetAutonomyState(
+            energy: 0.8,
+            curiosity: 0.5,
+            socialNeed: 0.9,
+            focusPressure: 0,
+            weatherInterest: 0.2,
+            dominantDrive: .seekAttention,
+            preferredInteraction: .toy
+        )
+
+        #expect(PetAutonomyDirector.event(
+            for: .dog,
+            state: dancing,
+            roll: 0
+        ) == .idleAction2)
+        #expect(PetAutonomyDirector.event(
+            for: .dog,
+            state: playing,
+            roll: 0
+        ) == .walk)
+    }
 }

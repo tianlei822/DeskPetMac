@@ -30,7 +30,8 @@ let package = Package(
         .testTarget(
             name: "DeskPetMacTests",
             dependencies: ["DeskPetMac"],
-            path: "Tests/DeskPetMacTests"
+            path: "Tests/DeskPetMacTests",
+            exclude: ["VisualBaselines"]
         )
     ]
 )

@@ -71,6 +71,8 @@ private struct WeatherAtmosphereLayer: View {
     let layer: WeatherLayer
     let pointerOffset: CGSize
     let reduceMotion: Bool
+    @Environment(\.petWindowIsVisible) private var petWindowIsVisible
+    @Environment(\.petRenderTimeOverride) private var renderTimeOverride
     private let particleSeeds: [WeatherParticleSeed]
 
     init(
@@ -103,11 +105,20 @@ private struct WeatherAtmosphereLayer: View {
     @ViewBuilder
     var body: some View {
         Group {
-            if profile.renderingMode(reduceMotion: reduceMotion) == .staticCue || !requiresTimeline {
+            if let renderTimeOverride {
+                atmosphere(
+                    time: renderTimeOverride,
+                    moving: profile.renderingMode(reduceMotion: reduceMotion) == .animated
+                        && requiresTimeline
+                )
+            } else if profile.renderingMode(reduceMotion: reduceMotion) == .staticCue || !requiresTimeline {
                 atmosphere(time: 0, moving: false)
             } else {
                 TimelineView(
-                    .animation(minimumInterval: 1.0 / profile.maximumFramesPerSecond)
+                    .animation(
+                        minimumInterval: 1.0 / profile.framesPerSecond(for: layer.depth),
+                        paused: !petWindowIsVisible
+                    )
                 ) { timeline in
                     atmosphere(
                         time: timeline.date.timeIntervalSinceReferenceDate,
