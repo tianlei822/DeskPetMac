@@ -9,9 +9,10 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 - Transparent floating pet window, draggable by background.
 - **Multi-display continuity / 多显示器连续性** — each display keeps its own safe normalized position; resizing or disconnecting a display preserves the companion’s relative placement and migrates older screen-number preferences automatically.
 - **Context-aware autonomy / 情境自主行为** — energy, curiosity, social need, local time, weather, bond, and your current focus streak influence whether each pet explores, self-grooms, watches the weather, seeks attention, rests, or stretches with you.
-- **Character motion / 角色动作** — Cat, Pauli, and Dog use one canonical layered rig for locomotion, autonomous idle gestures, direct-touch weight shifts, and remembered-preference body language, with grounded feet, safe interruption, and escalating pat-combo bracing; topology-changing poses keep explicit artwork fallbacks.
+- **Continuous character motion / 连续角色动作** — Cat and Dog retain their realistic artwork in one connected deformation field, with local head, paw, tail, and eyelid motion. Position and velocity survive interrupted interactions. Pauli uses a compact CyboPal-inspired six-axis arm, landscape screen, and fixed base; Look Around replaces its walking action. Ambient presentation runs at 30 fps and active motion at 60 fps, with hidden-window pausing and Reduce Motion support.
 - **Staged attention / 分阶段注意力** — when the pointer approaches, the eyes react first, ears or sensors orient next, then the head and body follow at character-specific tempos; crossing into the pet window continues the same response instead of restarting it.
 - **Natural wake-up / 自然苏醒** — returning after idle triggers a quiet, bubble-free stretch and orient sequence; direct interaction interrupts it immediately, while Reduce Motion uses one short orienting pose.
+- **Ambient status / 环境化状态** — weather and mood are expressed through the scene and pet behavior; clicking, dancing, switching pets, and refreshing weather do not open a status card.
 - **Observation-driven weather / 实况天气** — real precipitation, cloud cover, humidity, visibility, wind, gusts, and day/night observations drive layered clouds, fog, rain, snow, moonlight, splashes, wet reflections, and storm illumination.
 - **Treat interaction / 投喂互动** — use the gift control or `Cmd+T` for a complete toss, watch, approach, sniff, eat, and satisfied response instead of an instant particle effect.
 - **Spatial touch / 空间触摸** — pat the head, boop a nose or sensor, hold for a nuzzle, make a natural back-and-forth scratch near an ear or chin, or quickly swipe to ruffle the pet in that direction; responses also reflect touch position/speed, interrupted activity, stormy mood, familiarity, bond, and character voice.
@@ -20,10 +21,10 @@ Interactive macOS desktop pet. It floats on the desktop, reacts to clicks, chang
 - **System accessibility / 系统辅助功能** — Reduce Motion and Increase Contrast are honored automatically; higher contrast strengthens bubble borders, supporting text, reminder buttons, and menu selection without relying on color alone.
 - **Pat combos** — rapid taps build from a soft bounce into a 5+ hit starburst celebration, with a longer-lived `×N` badge.
 - **Floating heart particles** burst out when you pat or make the pet dance.
-- **Bond / affection system** — pats and play grow affection through five levels (New Friend → Soulmate), with hearts and a progress bar in the status bubble. Bond, pet choice, and reminder interval all persist across launches.
+- **Bond / affection system** — pats and play grow affection through five levels (New Friend → Soulmate), expressed through interaction responses and companion behavior. Bond, pet choice, and reminder interval all persist across launches.
 - **Dance action** — tap the ♪ button (or `Cmd+D`) and the pet wiggles, tilts, and earns affection.
 - **Personality moments / 个性时刻** — every so often the pet quietly shares a short, contextual thought without stealing focus or sending a notification.
-- Three distinct companions: a mischievous realistic Cat, curious PBR robot Pauli, and enthusiastic realistic Dog.
+- Three distinct companions: a mischievous realistic Cat, curious CyboPal screen robot Pauli, and enthusiastic realistic Dog.
 - Choose Cat, Pauli, or Dog from the picker or with `Cmd+1`, `Cmd+2`, and `Cmd+3`.
 - **Distinct voices / 鲜明个性** — Cat is lazy and mischievous, Pauli is earnest and curious, and Dog is enthusiastic and loyal.
 - **Sleep mode** — when you go idle for a while the pet closes its eyes and drifts off with floating `z`s, then wakes the moment you interact.
@@ -51,6 +52,10 @@ The script builds and opens:
 ```
 
 The transparent desktop window uses a compact `260 x 290` canvas so weather can render behind and in front of the pet.
+
+Local packaging uses the existing `Jarvis Codex Local Development` identity. Override it with `APPLE_SIGNING_IDENTITY` when using an authorized distribution identity. Set `DESKPET_APP_PATH` to package an isolated review app.
+
+The September 2026 renderer changes and verification limitations are recorded in [continuous character rendering](docs/quality/continuous-character-rendering.md).
 
 第一次运行时，macOS 可能会请求位置和通知权限。
 
@@ -101,7 +106,7 @@ Export the staged stretch-then-prompt break ritual for all three companions:
 scripts/export-break-ritual-snapshots.sh
 ```
 
-Export standard/increased contrast previews for personality, reminder, status, and menu surfaces:
+Export standard/increased contrast previews for personality, reminder, and menu surfaces:
 
 ```bash
 scripts/export-accessibility-contrast-snapshots.sh
