@@ -18,9 +18,9 @@ public struct PetRenderCadence: Equatable, Sendable {
         } else if isDirectInteraction {
             maximumFramesPerSecond = 60
         } else if isActiveMotion {
-            maximumFramesPerSecond = 30
+            maximumFramesPerSecond = 60
         } else {
-            maximumFramesPerSecond = 12
+            maximumFramesPerSecond = 30
         }
 
         return PetRenderCadence(

@@ -23,7 +23,6 @@ struct PetGreetingRitualIntegrationTests {
     #expect(moment.petKind == .dog)
     #expect(moment.pose == .proud)
     #expect(fixture.model.activeActivity.kind == .personality)
-    #expect(!fixture.model.isStatusVisible)
     #expect(fixture.model.affectionPulse == 1)
   }
 
@@ -41,7 +40,7 @@ struct PetGreetingRitualIntegrationTests {
 
     #expect(fixture.model.activePersonalityMoment == nil)
     #expect(fixture.model.interactionCallout == "You're back already!")
-    #expect(fixture.model.isStatusVisible)
+    #expect(fixture.model.activeActivity.kind == .autonomous)
     #expect(fixture.model.affectionPulse == 0)
   }
 

@@ -11,7 +11,6 @@ final class PetViewModel: ObservableObject {
   @Published private(set) var breakRitualPhase = PetBreakRitualPhase.idle
   @Published private(set) var affectionPulse = 0
   @Published private(set) var isRefreshingWeather = false
-  @Published private(set) var isStatusVisible = false
   @Published private(set) var petKind: PetKind = .cat
   @Published private(set) var bond = PetBond()
   @Published private(set) var isSleeping = false
@@ -53,7 +52,6 @@ final class PetViewModel: ObservableObject {
       cancelRootMotion()
       cancelBreakReminderRitual()
       clearPersonalityMoment()
-      isStatusVisible = false
       soundPlayer.stop()
     }
   }
@@ -95,7 +93,6 @@ final class PetViewModel: ObservableObject {
   private var pendingStartupGreeting: PetGreeting?
   private var recentPersonalityMomentIDs: [String] = []
   private var lastRelationshipCueAt: Date?
-  private var statusRevealToken = 0
   private var lastPatAt: Date?
   private var lastInteractionAt = Date()
   private var dragLeanTracker = DragLeanTracker()
@@ -256,12 +253,10 @@ final class PetViewModel: ObservableObject {
   }
 
   func refreshWeather() async {
-    revealStatusBriefly()
     isRefreshingWeather = true
     defer {
       isRefreshingWeather = false
       refreshAutonomyState()
-      revealStatusBriefly()
     }
 
     guard let place = await locationService.requestCurrentPlace() else {
@@ -310,8 +305,6 @@ final class PetViewModel: ObservableObject {
       _ = presentPersonalityMoment(category: .interaction)
     } else if response.presentsCallout {
       showInteractionCallout(response.line)
-    } else {
-      revealStatusBriefly()
     }
   }
 
@@ -391,7 +384,6 @@ final class PetViewModel: ObservableObject {
     cancelTreatJourney()
     clearPersonalityMoment()
     isReminderVisible = false
-    isStatusVisible = false
     toyPosition = CGPoint(x: 0.72, y: 0.46)
     activeToyKind = .forPet(petKind)
   }
@@ -451,7 +443,6 @@ final class PetViewModel: ObservableObject {
     affectionPulse += 1
     heartBurst += 1
     isDancing = true
-    revealStatusBriefly()
 
     danceTask?.cancel()
     danceTask = Task { [weak self] in
@@ -476,7 +467,6 @@ final class PetViewModel: ObservableObject {
     cancelTreatJourney()
     clearPersonalityMoment()
     isReminderVisible = false
-    isStatusVisible = false
 
     activeToyKind = nil
     toyMotionTask?.cancel()
@@ -497,6 +487,14 @@ final class PetViewModel: ObservableObject {
     swipeIntensity = 0
 
     rootMotionFrame = nil
+    if petKind == .pauli {
+      presentPersonalityMoment(category: .interaction, override: PersonalityMoment(
+        id: "pauli-look-around", petKind: .pauli, category: .interaction,
+        pose: .peek, line: "Let me take a look around."
+      ))
+      showInteractionCallout("Looking around.")
+      return
+    }
     rootMotionRequest = PetRootMotionRequest(
       desiredDistance: desiredDistance,
       preferredDirection: preferredDirection
@@ -711,7 +709,6 @@ final class PetViewModel: ObservableObject {
     breakState = policy.markBreakTaken(state: breakState)
     sessionState = workTracker.start()
     isReminderVisible = false
-    revealStatusBriefly()
   }
 
   func snoozeBreak() {
@@ -724,10 +721,7 @@ final class PetViewModel: ObservableObject {
     wake()
     noteInteraction()
     clearPersonalityMoment()
-    guard petKind != kind else {
-      revealStatusBriefly()
-      return
-    }
+    guard petKind != kind else { return }
     persistBond()
     let greeting = PetMemory.greeting(
       lastSeenAt: petMemories[kind].lastSeenAt,
@@ -741,10 +735,7 @@ final class PetViewModel: ObservableObject {
     defaults.set(kind.rawValue, forKey: StoreKey.petKind)
     loadCurrentMemory()
     refreshAutonomyState()
-    let usesPersonalityGreeting = showGreeting(greeting)
-    if !usesPersonalityGreeting {
-      revealStatusBriefly()
-    }
+    showGreeting(greeting)
   }
 
   func giveTreat() {
@@ -752,7 +743,6 @@ final class PetViewModel: ObservableObject {
     noteInteraction()
     clearPersonalityMoment()
     isReminderVisible = false
-    isStatusVisible = false
     activeToyKind = nil
     toyMotionTask?.cancel()
     toyMotionTask = nil
@@ -1046,7 +1036,6 @@ final class PetViewModel: ObservableObject {
       || isSleeping
       || wakeRitualPhase != nil
       || breakRitualPhase != .idle
-      || isStatusVisible
       || isRefreshingWeather
       || isDancing
       || treatJourneyFrame != nil
@@ -1066,12 +1055,13 @@ final class PetViewModel: ObservableObject {
 
   @discardableResult
   private func presentPersonalityMoment(
-    category: PersonalityMomentCategory? = nil
+    category: PersonalityMomentCategory? = nil,
+    override: PersonalityMoment? = nil
   ) -> Bool {
     let context = personalityContext(requestedCategory: category)
     let recentIDs = Set(recentPersonalityMomentIDs)
     let roll = Int.random(in: Int.min...Int.max)
-    var moment = PersonalityMomentSelector.select(
+    var moment = override ?? PersonalityMomentSelector.select(
       from: PersonalityMomentCatalog.all,
       context: context,
       excluding: recentIDs,
@@ -1200,7 +1190,6 @@ final class PetViewModel: ObservableObject {
 
     cancelRootMotion()
     clearPersonalityMoment()
-    isStatusVisible = false
     isReminderVisible = false
     breakRitualPhase = .stretching
 
@@ -1347,7 +1336,6 @@ final class PetViewModel: ObservableObject {
 
     interactionCalloutTask?.cancel()
     interactionCallout = nil
-    isStatusVisible = false
     let moment = PersonalityMoment(
       id: "greeting.\(petKind.rawValue).\(greeting.ritualID)",
       petKind: petKind,
@@ -1421,7 +1409,8 @@ final class PetViewModel: ObservableObject {
   }
 
   private func scheduleRootMotionIfNeeded() {
-    guard rootMotionRequest == nil,
+    guard petKind != .pauli,
+      rootMotionRequest == nil,
       isPetWindowVisible,
       !isQuietModeEnabled,
       autonomyState.dominantDrive == .explore,
@@ -1431,7 +1420,6 @@ final class PetViewModel: ObservableObject {
       !isScratching,
       !isNuzzling,
       breakRitualPhase == .idle,
-      !isStatusVisible,
       activeToyKind == nil,
       treatJourneyFrame == nil,
       activePersonalityMoment == nil
@@ -1466,27 +1454,6 @@ final class PetViewModel: ObservableObject {
       preferredInteraction: memory.preferredInteraction,
       rhythmAffinity: memory.rhythmAffinity(atHour: hour)
     )
-  }
-
-  private func revealStatusBriefly() {
-    guard
-      PetQuietModePolicy.allows(
-        .status,
-        isQuietModeEnabled: isQuietModeEnabled
-      )
-    else { return }
-    clearPersonalityMoment()
-    statusRevealToken += 1
-    let token = statusRevealToken
-    isStatusVisible = true
-
-    Task { [weak self] in
-      try? await Task.sleep(for: .seconds(3))
-      guard let self else { return }
-      if self.statusRevealToken == token, !self.isRefreshingWeather {
-        self.isStatusVisible = false
-      }
-    }
   }
 }
 

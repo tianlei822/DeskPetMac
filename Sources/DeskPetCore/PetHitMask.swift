@@ -10,6 +10,10 @@ public enum PetHitMask {
               (0...1).contains(point.x),
               (0...1).contains(point.y) else { return false }
 
+        if petKind == .pauli,
+           CGRect(x: 0.31, y: 0.23, width: 0.54, height: 0.29).contains(point) {
+            return true
+        }
         return zones(for: petKind).contains { $0.contains(point) }
     }
 

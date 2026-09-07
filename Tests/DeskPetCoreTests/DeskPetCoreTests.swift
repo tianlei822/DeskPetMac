@@ -1062,8 +1062,8 @@ struct PetRenderCadenceTests {
             isActiveMotion: true
         )
 
-        #expect(idle.maximumFramesPerSecond == 12)
-        #expect(active.maximumFramesPerSecond == 30)
+        #expect(idle.maximumFramesPerSecond == 30)
+        #expect(active.maximumFramesPerSecond == 60)
     }
 
     @Test("Reduce Motion lowers cadence and hidden windows pause")

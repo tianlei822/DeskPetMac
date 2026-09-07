@@ -254,13 +254,13 @@ enum PetUnifiedRigVisualSequence {
 
 @Suite("Pet root-motion visual sequence")
 struct PetRootMotionVisualTests {
-  @Test("every companion renders opposing unified-rig gait phases")
+  @Test("walking animals render opposing continuous gait phases")
   @MainActor
   func everyCompanionRendersOpposingGaitPhases() throws {
     let samples = PetUnifiedRigVisualSequence.opposingGaitFrames()
     #expect(samples.count == 2)
 
-    for petKind in PetKind.allCases {
+    for petKind in [PetKind.cat, .dog] {
       let rendered = try samples.map { _, frame in
         try PetVisualSnapshotRenderer.pngData(
           for: PetVisualSnapshotCase(

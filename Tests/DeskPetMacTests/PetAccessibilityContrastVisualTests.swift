@@ -73,24 +73,6 @@ enum PetAccessibilityContrastVisualSequence {
           expectedSize: PetVisualSnapshotScene.sceneSize
         ))
 
-      let statusName = "\(contrastMode.name)-status.png"
-      let statusSize = CGSize(width: 250, height: 105)
-      previews.append(
-        PetAccessibilityContrastPreview(
-          name: statusName,
-          data: try PetVisualSnapshotRenderer.pngData(
-            for: ContrastPreviewCanvas(
-              contrastMode: contrastMode.mode,
-              colorScheme: .dark
-            ) {
-              StatusBubble(model: model, mood: .cozy)
-            },
-            size: statusSize,
-            artifactName: statusName
-          ),
-          expectedSize: statusSize
-        ))
-
       let menuName = "\(contrastMode.name)-menu.png"
       let menuSize = CGSize(width: 300, height: 600)
       previews.append(
@@ -173,11 +155,11 @@ private struct ContrastPreviewCanvas<Content: View>: View {
 
 @Suite("Pet accessibility contrast visuals")
 struct PetAccessibilityContrastVisualTests {
-  @Test("all four companion surfaces render in both contrast modes")
+  @Test("all three companion surfaces render in both contrast modes")
   @MainActor
   func allSurfacesRenderInBothModes() throws {
     let previews = try PetAccessibilityContrastVisualSequence.render()
-    #expect(previews.count == 8)
+    #expect(previews.count == 6)
 
     for preview in previews {
       let bitmap = try #require(NSBitmapImageRep(data: preview.data))
@@ -186,7 +168,7 @@ struct PetAccessibilityContrastVisualTests {
       #expect(preview.data.count > 1_000)
     }
 
-    for surface in ["personality", "reminder", "status", "menu"] {
+    for surface in ["personality", "reminder", "menu"] {
       let standard = try #require(
         previews.first { $0.name == "standard-\(surface).png" }
       )
@@ -215,6 +197,6 @@ struct PetAccessibilityContrastVisualTests {
       at: output,
       includingPropertiesForKeys: nil
     ).filter { $0.pathExtension == "png" }.count
-    #expect(pngCount == 8)
+    #expect(pngCount == 6)
   }
 }

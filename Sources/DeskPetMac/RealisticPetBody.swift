@@ -432,6 +432,7 @@ struct RealisticPetBody: View {
     let cursorAttention: (TimeInterval) -> PetAttentionSample?
     let onDelight: () -> Void
     let artworkOverride: String?
+    var interactionPose: PetAnimationPose = .neutral
     @Environment(\.petWindowIsVisible) private var petWindowIsVisible
     @Environment(\.petRenderTimeOverride) private var renderTimeOverride
     @Environment(\.petAttentionElapsedOverride) private var attentionElapsedOverride
@@ -515,7 +516,9 @@ struct RealisticPetBody: View {
             let lean = dragLean(at: time)
 
             Group {
-                if let maskArtwork {
+                if artworkOverride == nil {
+                    continuousArtwork(at: time, motion: motion)
+                } else if let maskArtwork {
                     ZStack {
                         contactShadow(
                             at: time,
@@ -736,6 +739,41 @@ struct RealisticPetBody: View {
             isShowingDelight = false
             delightStartedAt = nil
         }
+    }
+
+    private func continuousArtwork(at time: Double, motion: PetMotionFrame) -> some View {
+        let gaze = gazePose(at: time, motion: motion)
+        let lean = dragLean(at: time)
+        let offset = composedOffset(at: time, motion: motion)
+        let bodyPose = PetAnimationPose(
+            x: offset.width + gaze.x + lean.offsetX + interactionPose.x,
+            y: offset.height + gaze.y + lean.offsetY + interactionPose.y,
+            scale: Double(composedVerticalScale(at: time, motion: motion)) * interactionPose.scale,
+            tiltDegrees: animatedTilt(at: time) + weatherTilt(at: time)
+                + motion.tiltDegrees + gaze.tiltDegrees + lean.tiltDegrees + interactionPose.tiltDegrees
+        )
+        let rigPose = isShowingPat
+            ? PetUnifiedRigDirectTouchMotion.pose(pet: kind,
+                elapsed: elapsed(since: patStartedAt, at: time),
+                comboCount: patCombo, reduceMotion: reduceMotion)
+            : relationshipGesture.map {
+                PetUnifiedRigRelationshipMotion.pose(pet: kind, gesture: $0,
+                    elapsed: relationshipGestureElapsed(at: time), reduceMotion: reduceMotion)
+            } ?? PetUnifiedRigMotion.pose(pet: kind, motion: motion,
+                rootMotion: rootMotionFrame, reduceMotion: reduceMotion)
+        let eyes = eyeGazeDirection(at: time, motion: motion) ?? .zero
+        let closed = isSleeping || isNuzzleActive(at: time)
+            ? 1 : (reduceMotion ? 0 : PetAnimationDynamics.blinkEnvelope(for: kind, time: time))
+        return PetContinuousArtwork(kind: kind, time: time, bodyPose: bodyPose,
+            rigPose: rigPose,
+            tailPose: PetTailMotion.pose(for: kind, time: time,
+                energy: isSleeping ? 0 : autonomyState.energy,
+                curiosity: autonomyState.curiosity, socialNeed: autonomyState.socialNeed),
+            attention: eyes, eyeClosure: closed, sleeping: isSleeping,
+            reduceMotion: reduceMotion, immediate: renderTimeOverride != nil,
+            personalityPose: personalityPose, weatherProfile: weatherProfile,
+            activityKind: activity.kind, motionFrame: motion)
+            .id(kind)
     }
 
     private var renderCadence: PetRenderCadence {

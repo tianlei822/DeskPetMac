@@ -146,7 +146,13 @@ struct PetWindowView: View {
                 dragLeanAt: { time in model.dragLean(at: time) },
                 cursorAttention: { model.cursorAttention(at: $0) },
                 onDelight: { model.delight() },
-                artworkOverride: nil
+                artworkOverride: nil,
+                interactionPose: PetAnimationPose(
+                  x: model.strokeOffset.width + feedingBodyOffset.width,
+                  y: model.strokeOffset.height + feedingBodyOffset.height,
+                  scale: model.strokeScale * feedingBodyScale,
+                  tiltDegrees: model.strokeTiltDegrees
+                )
               )
             } else {
               VectorPetBody(
@@ -166,10 +172,6 @@ struct PetWindowView: View {
             height: SceneMetrics.artworkSize.height
           )
           .coordinateSpace(name: "pet-artwork")
-          .scaleEffect(model.strokeScale * feedingBodyScale)
-          .rotationEffect(.degrees(model.strokeTiltDegrees))
-          .offset(model.strokeOffset)
-          .offset(feedingBodyOffset)
           .contentShape(Rectangle())
           .gesture(
             SpatialTapGesture()
@@ -241,7 +243,7 @@ struct PetWindowView: View {
           .accessibilityAction(named: "Give Treat") {
             model.giveTreat()
           }
-          .accessibilityAction(named: "Take a Stroll") {
+          .accessibilityAction(named: model.petKind == .pauli ? "Look Around" : "Take a Stroll") {
             model.takeStroll()
           }
           .accessibilityLabel("Interact with \(model.petKind.displayName)")
@@ -314,7 +316,7 @@ struct PetWindowView: View {
       Button("Pat") { model.pat() }
       Button("Dance") { model.dance() }
       Button("Give Treat") { model.giveTreat() }
-      Button("Take a Stroll") { model.takeStroll() }
+      Button(model.petKind == .pauli ? "Look Around" : "Take a Stroll") { model.takeStroll() }
       Divider()
       Button("Refresh Weather") {
         Task { await model.refreshWeather() }
@@ -357,7 +359,6 @@ struct PetWindowView: View {
     .animation(.spring(response: 0.32, dampingFraction: 0.6), value: model.comboCount)
     .animation(.easeInOut(duration: 0.3), value: model.isSleeping)
     .animation(.easeInOut(duration: 0.22), value: model.isReminderVisible)
-    .animation(.easeInOut(duration: 0.2), value: model.isStatusVisible)
     .animation(
       reduceMotion
         ? .linear(duration: 0.08)
@@ -409,9 +410,6 @@ struct PetWindowView: View {
   private var activeBubbleKind: PetBubbleKind? {
     if model.isReminderVisible {
       return .reminder
-    }
-    if model.isStatusVisible {
-      return .status
     }
     if model.activePersonalityMoment != nil {
       return .personality
@@ -532,13 +530,6 @@ struct PetWindowView: View {
     if model.isReminderVisible {
       BreakBubble(model: model)
         .transition(.move(edge: .top).combined(with: .opacity))
-    } else if model.isStatusVisible {
-      StatusBubble(model: model, mood: displayedMood)
-        .transition(
-          reduceMotion
-            ? .opacity
-            : .move(edge: .top).combined(with: .opacity)
-        )
     } else if let moment = model.activePersonalityMoment {
       PersonalityBubble(
         moment: moment,
@@ -592,65 +583,6 @@ struct BreakBubbleContent: View {
     .petContrastSurface(
       cornerRadius: 18,
       borderOpacity: 0.30
-    )
-  }
-}
-
-struct StatusBubble: View {
-  @ObservedObject var model: PetViewModel
-  let mood: PetWeatherMood
-
-  var body: some View {
-    HStack(spacing: 12) {
-      VStack(alignment: .leading, spacing: 4) {
-        Text(model.bondTitle)
-          .font(.system(size: 11, weight: .bold, design: .rounded))
-        HStack(spacing: 2) {
-          ForEach(0..<model.bondHearts, id: \.self) { _ in
-            Image(systemName: "heart.fill")
-              .font(.system(size: 8))
-              .foregroundStyle(.pink)
-          }
-        }
-        ProgressView(value: model.bondProgress)
-          .progressViewStyle(.linear)
-          .tint(.pink)
-          .frame(width: 86)
-        Text(model.autonomyState.dominantDrive.activityLabel)
-          .font(.system(size: 8, weight: .medium, design: .rounded))
-          .petSupportingForeground(.secondary)
-          .lineLimit(1)
-          .frame(width: 86, alignment: .leading)
-      }
-
-      Divider()
-        .frame(height: 34)
-
-      VStack(alignment: .trailing, spacing: 3) {
-        Text(mood.displayName)
-          .font(.system(size: 11, weight: .semibold, design: .rounded))
-        Text(model.weatherTemperatureSummary)
-          .font(.system(size: 9, weight: .medium, design: .rounded))
-          .petSupportingForeground(.secondary)
-          .lineLimit(1)
-        Text(model.weatherAtmosphereSummary)
-          .font(.system(size: 9, weight: .medium, design: .rounded))
-          .petSupportingForeground(.tertiary)
-          .lineLimit(1)
-      }
-    }
-    .padding(.horizontal, 13)
-    .padding(.vertical, 9)
-    .petContrastSurface(
-      cornerRadius: 15,
-      borderOpacity: 0.32,
-      shadowOpacity: 0.10,
-      shadowRadius: 7,
-      shadowY: 3
-    )
-    .accessibilityElement(children: .combine)
-    .accessibilityLabel(
-      "\(model.bondTitle). \(model.autonomyState.dominantDrive.activityLabel). \(mood.displayName) \(model.weatherTemperatureSummary), \(model.weatherAtmosphereSummary), in \(model.weather.locationName)"
     )
   }
 }
