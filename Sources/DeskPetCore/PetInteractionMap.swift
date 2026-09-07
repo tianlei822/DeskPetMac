@@ -21,6 +21,10 @@ public enum PetInteractionMap {
         if anchors.noseOrSensor.contains(point) {
             return .noseOrSensor
         }
+        if petKind == .pauli,
+           CGRect(x: 0.25, y: 0.07, width: 0.67, height: 0.38).contains(point) {
+            return .head
+        }
         if anchors.head.contains(point) {
             return .head
         }

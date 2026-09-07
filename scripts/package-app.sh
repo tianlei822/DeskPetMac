@@ -6,7 +6,8 @@ cd "$(dirname "$0")/.."
 product_name="DeskPetMac"
 bundle_id="local.deskpet.mac"
 configuration="release"
-app_path=".build/${configuration}/${product_name}.app"
+app_path="${DESKPET_APP_PATH:-.build/${configuration}/${product_name}.app}"
+signing_identity="${APPLE_SIGNING_IDENTITY:-B4035AE98DA51B2F173CF52BAACC758E5B35DF63}"
 contents_path="${app_path}/Contents"
 macos_path="${contents_path}/MacOS"
 resources_path="${contents_path}/Resources"
@@ -74,6 +75,6 @@ cat > "${contents_path}/Info.plist" <<EOF
 </plist>
 EOF
 
-codesign --force --deep --sign - "${app_path}" >&2
+codesign --force --deep --sign "${signing_identity}" "${app_path}" >&2
 
 echo "${PWD}/${app_path}"

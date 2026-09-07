@@ -97,17 +97,19 @@ struct PetMenuView: View {
                 model.takeStroll()
             } label: {
                 Label(
-                    model.rootMotionRequest == nil
+                    model.petKind == .pauli ? "Look Around" : model.rootMotionRequest == nil
                         ? "Take a Stroll"
                         : "Change Route",
-                    systemImage: "figure.walk"
+                    systemImage: model.petKind == .pauli ? "viewfinder" : "figure.walk"
                 )
                 .font(.system(size: 11, weight: .semibold, design: .rounded))
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 7)
             }
             .buttonStyle(.bordered)
-            .accessibilityHint("Moves the companion safely across this display")
+            .accessibilityHint(model.petKind == .pauli
+                ? "Pauli looks around with its base grounded"
+                : "Moves the companion safely across this display")
 
             HStack(spacing: 8) {
                 actionButton("Pat", systemImage: "hand.tap.fill") {

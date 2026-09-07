@@ -12,6 +12,7 @@ struct PetStrollRequestTests {
   @MainActor
   func intentionalStrollCreatesRootMotionRequest() throws {
     let model = PetViewModel()
+    model.selectPetKind(.cat)
 
     model.takeStroll(
       desiredDistance: 112,
@@ -45,6 +46,7 @@ struct PetStrollRequestTests {
   @MainActor
   func staleCompletionCannotCancelNewRequest() throws {
     let model = PetViewModel()
+    model.selectPetKind(.dog)
     model.takeStroll(
       desiredDistance: 80,
       preferredDirection: .left
@@ -62,6 +64,17 @@ struct PetStrollRequestTests {
     model.completeRootMotion(id: secondID)
     #expect(model.rootMotionRequest == nil)
     #expect(model.rootMotionFrame == nil)
+  }
+
+  @Test("the fixed-base screen robot explores without translating its window")
+  @MainActor
+  func robotStaysGrounded() {
+    let model = PetViewModel()
+    model.selectPetKind(.pauli)
+    model.takeStroll(desiredDistance: 120, preferredDirection: .right)
+    #expect(model.rootMotionRequest == nil)
+    #expect(model.rootMotionFrame == nil)
+    #expect(model.interactionCallout == "Looking around.")
   }
 }
 

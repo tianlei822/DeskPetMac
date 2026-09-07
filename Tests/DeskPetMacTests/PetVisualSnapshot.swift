@@ -152,7 +152,7 @@ struct PetVisualSnapshotScene: View {
             dragLeanAt: { _ in .neutral },
             cursorAttention: { _ in nil },
             onDelight: {},
-            artworkOverride: artworkResourceName
+            artworkOverride: nil
           )
           .frame(width: artworkSize.width, height: artworkSize.height)
 
