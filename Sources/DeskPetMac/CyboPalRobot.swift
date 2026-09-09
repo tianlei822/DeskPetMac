@@ -148,8 +148,8 @@ struct CyboPalRobot: View {
             let closure = min(1, max(0, eyeClosure))
             for x in [-17.0, 17.0] {
                 let height = 7.5 * (1 - closure) + 0.8
-                let center = onScreen(x + eyeDirection.width * 4,
-                                      1 - eyeDirection.height * 3)
+                let center = onScreen(x + Double(eyeDirection.width) * 4,
+                                      1 - Double(eyeDirection.height) * 3)
                 var eyeContext = context
                 let horizontal = onScreen(x + 1, 0)
                 let origin = onScreen(x, 0)
